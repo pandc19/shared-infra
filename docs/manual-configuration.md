@@ -76,7 +76,7 @@ Gotcha: a backup row that says **local** was not uploaded. Save to S3 and the de
 
 Do this with throwaway data before any real data matters (and before DNS cutover of any app).
 
-1. Create a database `restore_test` (section 6 commands) and add it to the backup selection.
+1. Create a database `restore_test` (section 6 steps 1-3) and add it to the backup selection.
 2. In it: `CREATE TABLE t (id int, note text); INSERT INTO t VALUES (1, 'before backup');`
 3. **Backup now**; confirm a `pg-dump-restore_test-...` file in Spaces.
 4. `DROP TABLE t;`
@@ -88,15 +88,62 @@ Do this with throwaway data before any real data matters (and before DNS cutover
 
 ## 6. One database and one role per app
 
-Coolify's default user is a superuser; apps should not use it. Run as that superuser (Coolify's terminal on the database page, or DBeaver, section 7):
+Every app gets its **own database and its own login role**, so a bug or leaked password in one app can't read another's data. Coolify's default user (`postgres`) is a superuser and is for admin work only; apps never use it. Naming: role `<app>_app`, database `<app>`.
 
-```sql
-CREATE ROLE poketrain LOGIN PASSWORD '<generated>';
-CREATE DATABASE poketrain OWNER poketrain;
-REVOKE ALL ON DATABASE poketrain FROM PUBLIC;
-```
+1. **Generate the password on your laptop** and save it in a password manager. This strips characters that break connection URLs:
+   `openssl rand -base64 24 | tr -d '/+='`
+2. **Open a superuser session**: Coolify's terminal on the `shared-postgres` page, then `psql -U postgres`; or DBeaver (section 7); or `ssh ... 'docker exec -it <container> psql -U postgres'`.
+3. **Create the role and database** (example for poketrain):
 
-Then add `poketrain` to the backup's database selection. The app's connection string uses the Postgres **internal** host Coolify shows for the database (the container's name), port `5432`, user `poketrain`, database `poketrain`. The app must be on the same Coolify destination network as the database (the default, for the same server). Keep a list of databases and owning apps in the runbook so a rebuild knows what to recreate.
+   ```sql
+   CREATE ROLE poketrain_app LOGIN PASSWORD '<generated>'
+     NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
+
+   CREATE DATABASE poketrain OWNER poketrain_app;
+
+   -- nobody but the owner (and superusers) can connect to this DB
+   REVOKE ALL ON DATABASE poketrain FROM PUBLIC;
+   ```
+
+4. **Lock down the databases that already exist.** Postgres lets any role connect to any database by default, so without this each app role could reach the others. Run once for each pre-existing database (`postgres`, and any made before this procedure):
+   `REVOKE CONNECT ON DATABASE postgres FROM PUBLIC;`
+   Every new database created with step 3 is already locked.
+5. **Add the database to the backup selection** on `shared-postgres` -> Backups, so it gets its own `pg-dump-<db>-...` file. Verify it appears in Spaces after the next run.
+6. **Give the app its connection settings** in Coolify's environment variables: host = the Postgres **internal** host Coolify shows for the database (the container's name), port `5432`, user `poketrain_app`, the generated password, database `poketrain`. URL-form: `postgresql://poketrain_app:<password>@<internal-host>:5432/poketrain`. The app must be on the same Coolify destination network as the database (the default for apps on the same server).
+7. **Record it** in the list of databases and owning apps in [DESTROY_AND_REBUILD.md](../DESTROY_AND_REBUILD.md) so a rebuild knows what to recreate. Roles and databases live inside Postgres, so they are recreated by repeating these steps, or come back with a restore only if the backup includes them.
+
+Restoring a dump into an app database is in section 6a.
+
+## 6a. Restoring a dump from your laptop into an app database
+
+For a dump file on your laptop (a migration from Render, or a downloaded Spaces backup). The Coolify terminal can't take file uploads, so stream the file over SSH using the laptop key from section 7; nothing is left on the droplet.
+
+1. **Check the format and version.**
+   - `pg_restore --list poketrain.dump | head` works for custom-format dumps (made with `pg_dump -Fc`, and what Coolify's `.dmp` files are). If it errors, it is probably plain SQL (`head poketrain.dump` shows `CREATE TABLE`/`COPY` text).
+   - The dump's source Postgres version must be **<= `shared-postgres`'s major version**, or the restore may fail.
+2. **Make sure the target exists and is empty** (section 6, steps 3-4), and find the container name on the droplet with `docker ps --format '{{.Names}}'`.
+3. **Custom-format dump, run from your laptop:**
+
+   ```sh
+   ssh -o IdentitiesOnly=yes -i ~/.ssh/shared_apps_ed25519 root@<reserved-ip> \
+     'docker exec -i <pg-container> pg_restore -U postgres -d poketrain --no-owner --no-privileges --role=poketrain_app --clean --if-exists --exit-on-error' \
+     < poketrain.dump
+   ```
+
+   It connects as the superuser (extensions like `pgcrypto` or `uuid-ossp` need that), but `--no-owner --role=poketrain_app` makes every restored object owned by the app role instead of the source database's owner (Render's role names won't exist here). `--no-privileges` skips source GRANTs.
+   **Plain SQL dump:**
+
+   ```sh
+   ssh -o IdentitiesOnly=yes -i ~/.ssh/shared_apps_ed25519 root@<reserved-ip> \
+     'docker exec -i <pg-container> psql -U postgres -d poketrain -v ON_ERROR_STOP=1' < poketrain.sql
+   ```
+
+   If a plain dump has owner statements, regenerate it with `pg_dump --no-owner --no-acl`, or fix ownership afterward with `REASSIGN OWNED BY <old-role> TO poketrain_app;`.
+4. **Verify** as the app role, not just as the superuser:
+   `ssh ... 'docker exec -it <pg-container> psql -U poketrain_app -d poketrain -c "\dt"'` (you may be prompted for the password), then compare row counts of a few tables against the source.
+5. Run `ANALYZE;` in the database so query plans are right after a bulk load, and run **Backup now** to capture the restored state.
+
+If you'd rather not use SSH, upload the file to a private Spaces path, download it on the droplet with a pre-signed URL (`s3cmd signurl` or the DO console), and run the same `pg_restore` with `< file` on the droplet. Delete the file afterward.
 
 ## 7. Connecting from your laptop (DBeaver)
 
