@@ -115,13 +115,16 @@ docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' <pg
 | SSH | Authentication | Public Key |
 | SSH | Private Key | `~/.ssh/shared_apps_ed25519` (plus its passphrase if you set one) |
 
+**Two different IPs:** the **SSH** tab takes the droplet's *public* IP (`<ip>`, the one your terminal uses); the **Main** tab takes the container's *private* IP from step A (for example `172.18.0.3`), which only makes sense from the droplet's side. Putting the private IP on the SSH tab gives `Connect timed out`.
+
 Click **Test tunnel configuration** on the SSH tab, then **Test Connection**.
 
 **C. Admin connection (optional):** a second connection with the same SSH tab, Username `postgres`, Database `postgres`; the password is on the `shared-postgres` page in Coolify. Use it only to create roles and databases (step 7); use the app role for everyday work.
 
 | Symptom | Fix |
 |---|---|
-| Tunnel test fails | Confirm the plain `ssh -o IdentitiesOnly=yes -i <key> root@<ip>` from step 3 works; check the key path and passphrase. |
+| Tunnel test: `Connect timed out` | The SSH tab holds the container's private IP; it must be the droplet's public IP. If it is right and your terminal also hangs, fail2ban banned your IP (`fail2ban-client set sshd unbanip <your-ip>` from Coolify's terminal). |
+| Tunnel test fails (other error) | Confirm the plain `ssh -o IdentitiesOnly=yes -i <key> root@<ip>` from step 3 works; check the key path and passphrase. |
 | Tunnel OK, DB connection refused or times out | The container IP changed: redo step A and edit the Main host. |
 | `password authentication failed` | Wrong role password; reset with `\password <app>_app` (troubleshooting below). |
 
