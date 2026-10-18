@@ -1,6 +1,7 @@
 name: Terraform
 
 # Pull request  -> plan (read-only preview, same-repo PRs only: fork PRs get no secrets).
+#                  Runs for every PR so the required `plan` check always reports.
 # Push to main  -> plan, then apply.
 # Manual run    -> choose an action:
 #                    plan    dry run
@@ -25,8 +26,10 @@ name: Terraform
 # Normal plan/apply use the `shared-infra` environment, which must have no reviewers.
 
 on:
+  # No path filter on pull_request: the `plan` job is a required status check on main, and a
+  # required check from a path-filtered workflow never reports on PRs that don't match,
+  # leaving docs-only PRs stuck on "Expected". Plan on a docs-only PR is a harmless no-op.
   pull_request:
-    paths: ['modules/**', 'environments/**', '.github/workflows/terraform.yml']
   push:
     branches: [main]
     paths: ['modules/**', 'environments/**', '.github/workflows/terraform.yml']

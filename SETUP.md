@@ -2,6 +2,8 @@
 
 How to bring `shared-infra` up from this repo. It explains **what to configure and where**, in order. The exact names and values of every secret, variable and setting are in [docs/deployment-reference.md](docs/deployment-reference.md); this guide doesn't repeat them.
 
+Detailed procedures for each manual step are in [docs/manual-configuration.md](docs/manual-configuration.md), and the branching/PR rules in [docs/git-flow.md](docs/git-flow.md).
+
 The repo already exists on GitHub with the workflow in place. What's left is the accounts, keys and settings around it, then a first apply, then Coolify.
 
 **Order:** DigitalOcean -> Cloudflare -> Coolify key -> GitHub -> first deploy -> verify -> Coolify server -> Postgres.
