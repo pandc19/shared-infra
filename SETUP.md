@@ -3,6 +3,12 @@
 Do these in order. Tick each box as you go. Terraform only builds the box; everything in
 Coolify (sections 7-9) is manual by design.
 
+**Status so far:** code pushed to GitHub; DO token, Project, Spaces bucket (nyc3, empty) and both Spaces keys done; Cloudflare token set; Cloudflare zone ID and Coolify public key set as GitHub variables; GitHub secrets/variables are in place except `BASE_DOMAIN` (verify) and `TERRAFORM_ENABLED` (deliberately unset, so the workflow does nothing yet). Still to do: Cloudflare SSL mode, GitHub environments, first apply (section 6), then Coolify (sections 7-9).
+
+Two ways to run Terraform; pick one and don't mix them:
+- **GitHub Actions** (sections 8 and 6A): values come from GitHub secrets/variables, no `terraform.tfvars` needed.
+- **Local** (sections 5 and 6B): values come from `terraform.tfvars` plus exported env vars.
+
 Values used throughout: bucket `shared-infra-storage` (state in `tfstate/`, Postgres backups in
 `pg-backups/`), DO Project `Shared Apps`, droplet `shared-apps-1`, domain `novaej.com`,
 apps at `<name>.novaej.com` (wildcard `*.novaej.com`; use hyphens, not underscores - underscores aren't valid in hostnames).
@@ -11,25 +17,25 @@ apps at `<name>.novaej.com` (wildcard `*.novaej.com`; use hyphens, not underscor
 
 ## 1. Accounts and local tools
 
-- [ ] DigitalOcean account, Cloudflare account (with `novaej.com` as an active zone), Coolify Cloud account, GitHub repo `pandc19/shared-infra`.
-- [ ] Terraform >= 1.7 (`terraform version`).
+- [x] DigitalOcean account, Cloudflare account (with `novaej.com` as an active zone), Coolify Cloud account, GitHub repo `pandc19/shared-infra`.
+- [ ] Terraform >= 1.7 (`terraform version`). Only needed for the local route.
 - [ ] `git`, `ssh`. Optional: `doctl` and `s3cmd`/`aws` CLI for poking at Spaces.
-- [ ] Get this code into your GitHub repo `pandc19/shared-infra` (currently empty): from the project folder, `git remote add origin https://github.com/pandc19/shared-infra.git`, commit, and `git push -u origin main`.
-      You run Terraform from your local copy of the repo (the `environments/shared` folder); anyone setting this up again later would `git clone` it instead.
+- [x] Code is pushed to https://github.com/pandc19/shared-infra (branch `main`). The workflow is disabled until `TERRAFORM_ENABLED=true`.
+      Someone setting this up again later would `git clone` it.
 
 ## 2. DigitalOcean
 
 - [x] **API token** - already created; GitHub secret `DO_TOKEN` already set. (Control Panel -> API -> Tokens, read+write.)
-- [ ] Local env var for running Terraform from your laptop: `TF_VAR_do_token` (same token value).
+- [ ] Local route only: env var `TF_VAR_do_token` (same token value).
 - [x] **DO Project** `Shared Apps` already exists. Terraform only looks it up by name and fails if it is missing or misspelled.
 - [x] **Spaces bucket** `shared-infra-storage` already exists in **nyc3** and is empty. Nothing to create: Terraform doesn't manage it (it can't create the bucket that holds its own state).
       `backend.tf` already points at `https://nyc3.digitaloceanspaces.com`. Keep the bucket private, no CDN. Optionally enable versioning on the bucket so an overwritten state file is recoverable.
-- [ ] **Limited Spaces keys.** You create these by hand; neither Terraform nor GitHub does. They are *not* in the bucket's file browser (the "create folder" screen) - they live under the account-level API page:
+- [x] **Limited Spaces keys** (created; `shared-infra-terraform-state` is also in GitHub). You create these by hand; neither Terraform nor GitHub does. They are *not* in the bucket's file browser (the "create folder" screen) - they live under the account-level API page:
       DigitalOcean control panel -> **API** (left sidebar, near the bottom) -> **Spaces Keys** tab (direct link: https://cloud.digitalocean.com/account/api/spaces) -> **Generate New Key**.
       Choose **Limited Access**, pick bucket `shared-infra-storage`, and give it **Read/Write/Delete**; the name is just a label. The secret is shown **once**, so copy both values immediately. Create **two** keys:
-  - [ ] `shared-infra-terraform-state` for Terraform. Local env vars: `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`.
+  - [x] `shared-infra-terraform-state` for Terraform. Local env vars: `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`.
         GitHub secrets: `SPACES_ACCESS_KEY_ID` and `SPACES_SECRET_ACCESS_KEY` (the workflow maps them to the `AWS_*` names).
-  - [ ] `shared-infra-coolify-backups` for Coolify (section 9). Keep it for the Coolify form; it does not go in Terraform or GitHub.
+  - [x] `shared-infra-coolify-backups` for Coolify (section 9). Keep it for the Coolify form; it does not go in Terraform or GitHub.
 
   Spaces keys are scoped per bucket, not per prefix, so both keys can technically read/write `tfstate/` and `pg-backups/`.
   Two keys only let you revoke one without breaking the other. Don't give the Coolify key to anything else.
@@ -37,8 +43,9 @@ apps at `<name>.novaej.com` (wildcard `*.novaej.com`; use hyphens, not underscor
 ## 3. Cloudflare
 
 - [x] **API token** - already created; GitHub secret `CLOUDFLARE_TOKEN` already set. It needs `Zone : DNS : Edit` on the `novaej.com` zone.
-- [ ] Local env var for running Terraform from your laptop: `TF_VAR_cloudflare_token` (same token value).
-- [ ] **Zone ID** - zone Overview page, right sidebar. Goes in `terraform.tfvars` (`cloudflare_zone_id`) / GitHub variable `CLOUDFLARE_ZONE_ID`. Not secret.
+- [ ] Local route only: env var `TF_VAR_cloudflare_token` (same token value).
+- [ ] Terraform needs this token to create the wildcard DNS record, so keep it. If you reuse Comprobify's token, it must cover the `novaej.com` zone; a separate token per project limits the damage if one leaks.
+- [x] **Zone ID** - set as GitHub variable `CLOUDFLARE_ZONE_ID`. (Where: zone Overview page, right sidebar, API section.) Local route: also `cloudflare_zone_id` in `terraform.tfvars`. Not secret.
 - [ ] **SSL/TLS -> Overview -> mode = Full (strict).** Required: the wildcard record is proxied, and Coolify's proxy (Traefik) serves valid Let's Encrypt certificates on the origin.
       "Flexible" would cause redirect loops and send traffic to the origin unencrypted; "Full" (non-strict) skips cert validation.
 - [ ] **Edge certificate:** nothing to do. Cloudflare's free Universal SSL covers `novaej.com` and `*.novaej.com`, which is exactly the one-level `<name>.novaej.com` pattern used here. (A two-level pattern like `<name>.apps.novaej.com` would need paid Advanced Certificate Manager; avoid it.)
@@ -57,12 +64,14 @@ With the default, hitting the raw IP bypasses Cloudflare's WAF/DDoS layer entire
 
 Coolify SSHes into the droplet **as root** with a key it generates. Terraform only ever receives the **public** half.
 
-- [ ] Coolify Cloud -> Keys & Tokens -> Private Keys -> Add. Generate a new ED25519 key (e.g. name `shared-apps-1`).
-- [ ] Copy the **public key** (one line, `ssh-ed25519 AAAA... coolify`). That is the Terraform variable `coolify_ssh_public_key` / GitHub variable `COOLIFY_SSH_PUBLIC_KEY`. Not secret.
+- [x] Coolify Cloud -> Keys & Tokens -> Private Keys -> Add. Generate a new ED25519 key (e.g. name `shared-apps-1`).
+- [x] Copy the **public key** (one line, `ssh-ed25519 AAAA... coolify`). Done: set as GitHub variable `COOLIFY_SSH_PUBLIC_KEY` (local route: `coolify_ssh_public_key` in tfvars). Not secret.
 - [ ] Never paste the private key anywhere. The variable validates the format and rejects private keys.
 - [ ] DigitalOcean rejects a public key that is already registered in the account (even under another name). If apply says the key is a duplicate, remove the old one in Settings -> Security.
 
-## 5. Local configuration
+## 5. Local configuration (local route only; skip if using GitHub Actions)
+
+The GitHub workflow does not use `terraform.tfvars` (it is git-ignored and never reaches the runner). It passes the GitHub secrets/variables to Terraform as `TF_VAR_*` / `AWS_*` env vars.
 
 - [ ] `cd environments/shared && cp terraform.tfvars.example terraform.tfvars` and fill in `coolify_ssh_public_key`, `base_domain = "novaej.com"`, `cloudflare_zone_id`. (`terraform.tfvars` is git-ignored.)
 - [ ] Export the secrets in your shell (don't put them in tfvars):
@@ -76,11 +85,25 @@ Coolify SSHes into the droplet **as root** with a key it generates. Terraform on
 
 ## 6. Init, plan, apply
 
-- [ ] `terraform init` (connects to the Spaces backend; failure here = wrong endpoint/region in `backend.tf` or wrong key).
-- [ ] `terraform plan` - expect to create: ssh key, droplet, reserved IP + assignment, firewall, project resources, one Cloudflare A record. Nothing destroyed.
+Expected plan: create the SSH key, droplet, reserved IP + assignment, firewall, project resources and one Cloudflare A record (`*.novaej.com`). Nothing destroyed.
+
+### 6A. Via GitHub Actions (finish section 8 first)
+
+- [ ] Open a throwaway PR touching a file under `modules/` or `environments/` (e.g. a comment). The `plan` job runs; read the plan in its log.
+- [ ] Merge to `main`. `plan` runs again, then `apply` creates everything. (Or Actions -> Terraform -> Run workflow -> `apply` on `main`.)
+- [ ] Read the reserved IP and the Coolify values at the end of the `apply` job log (`reserved_ip`, `coolify_server_settings` outputs).
+- [ ] Failure at `init`: wrong Spaces key or endpoint. Failure at `plan` with a project lookup error: the DO Project name doesn't match `Shared Apps`.
+
+### 6B. Locally (needs section 5)
+
+- [ ] `terraform init` (connects to the Spaces backend; failure here = wrong endpoint or wrong key).
+- [ ] `terraform plan`
 - [ ] `terraform apply`
 - [ ] `terraform output coolify_server_settings` and note the reserved IP.
-- [ ] Wait ~3-5 minutes for cloud-init, then verify the box:
+
+### Verify the box (either route)
+
+- [ ] Wait ~3-5 minutes for cloud-init, then:
 
   ```sh
   ssh root@<reserved-ip> 'cloud-init status --wait; ls /var/lib/cloud/shared-infra-provisioned; docker --version; docker compose version; swapon --show; sysctl vm.swappiness; systemctl is-active fail2ban; sshd -T | grep -E "^(permitrootlogin|passwordauthentication|allowusers|maxauthtries|logingracetime)"'
@@ -99,8 +122,11 @@ Coolify SSHes into the droplet **as root** with a key it generates. Terraform on
 
 ## 8. (Optional) GitHub Actions
 
-Skip if you only run Terraform locally. Don't run the same apply from both places at once.
+This is the GitHub route. Skip it if you run Terraform locally, and don't apply from both places.
 The workflow is pushed disabled: every job is skipped until the repository variable `TERRAFORM_ENABLED` is `true`.
+Do this section before 6A.
+
+**When it runs** (once enabled): PR or push to `main` that changes files under `modules/**`, `environments/**` or the workflow file itself - docs-only changes never trigger it. PR -> plan only. Push to `main` -> plan, then apply. Manual runs (Actions -> Terraform -> Run workflow: `plan`, `apply`, `destroy`) ignore the path filter. The `ignore_changes` on the droplet means cloud-init edits won't rebuild the box.
 
 Put **everything at repository level** (Settings -> Secrets and variables -> Actions). Do **not** put these in the Environments: the jobs run in two environments (`shared-infra`, `shared-infra-destroy`), and repository-level values are visible to both, while environment-level ones would need duplicating.
 
@@ -117,10 +143,11 @@ Put **everything at repository level** (Settings -> Secrets and variables -> Act
 | Repository variable | `TERRAFORM_ENABLED` | `true` only when ready to let the workflow run |
 
 - [x] `DO_TOKEN` and `CLOUDFLARE_TOKEN` are set. Confirm they are *repository* secrets; if you created them inside an Environment, re-add them at repository level.
-- [ ] Add the other secrets and variables above (leave `TERRAFORM_ENABLED` unset for now).
+- [x] `SPACES_ACCESS_KEY_ID`, `SPACES_SECRET_ACCESS_KEY`, `COOLIFY_SSH_PUBLIC_KEY` and `CLOUDFLARE_ZONE_ID` are set.
+- [ ] Add `BASE_DOMAIN` = `novaej.com` if you haven't (leave `TERRAFORM_ENABLED` unset until the environments below exist).
 - [ ] Settings -> Environments -> **`shared-infra`**: create it with **no** required reviewers (used by PR plans and push applies). It holds no secrets.
 - [ ] Settings -> Environments -> **`shared-infra-destroy`**: add yourself under *Required reviewers* (and a second person if you have one; on a personal repo you can approve your own runs unless you tick "prevent self-review"). Restrict deployment branches to `main`. It holds no secrets.
-- [ ] When everything above is done, set `TERRAFORM_ENABLED=true`. Open a throwaway PR to see the plan job go green before relying on it.
+- [ ] When everything above is done, set `TERRAFORM_ENABLED=true`, then follow 6A.
 - [ ] Behavior once enabled: PR -> plan; merge to `main` -> plan then apply; Actions -> Terraform -> Run workflow -> `destroy` -> approval 1, read the `plan -destroy` output, approval 2.
 
 ## 9. Create `shared-postgres` with S3 backups
