@@ -46,7 +46,15 @@ First make sure the S3 storage entry for `shared-infra-storage` still validates 
 
 Then get the dump: the latest file in `shared-infra-storage`, under `data/coolify/backups/databases/<team>/shared-postgres-<id>/` (files named `pg-dump-<db>-<timestamp>-<id>.dmp`). Restore it with Coolify's Restore action if your version has one for backups and S3 files. Otherwise download the file to the droplet (`scp`, or `curl` a pre-signed URL) or your laptop and run `docker exec -i <pg-container> pg_restore -U <user> -d <db> --clean --if-exists < dump.dmp`. Coolify's `.dmp` files are `pg_dump` custom format, so `pg_restore` is the right tool, not `psql`.
 
-The exact commands you verified in the restore test (SETUP.md section 8) belong here, so you don't have to rediscover them during an outage: `____`
+Verified on 2026-10-18 restoring a Neon custom-format dump (Postgres 18) of `poketrain` into `shared-postgres` (Postgres 18.6, container `ekvtijwonqbkqkf2jyu7bcbj`), streamed from a laptop over SSH with the laptop key described in [docs/manual-configuration.md](docs/manual-configuration.md) section 7:
+
+```sh
+ssh -o IdentitiesOnly=yes -i ~/.ssh/shared_apps_ed25519 root@<reserved-ip> \
+  'docker exec -i <pg-container> pg_restore -U postgres -d poketrain --no-owner --no-privileges --role=poketrain_app --clean --if-exists --exit-on-error' \
+  < poketrain.dump
+```
+
+It printed nothing and all 25 tables came back owned by `poketrain_app`. Create the role and empty database first (manual-configuration section 6). The container name changes if the database resource is recreated; find it with `docker ps --format '{{.Names}}'`.
 
 Before pointing apps at the restored database, check row counts or a known record in each database. Then re-enable the backup schedule on the new database resource and run **Backup now** once to confirm S3 still works. Finally redeploy the apps and check each URL over HTTPS.
 
