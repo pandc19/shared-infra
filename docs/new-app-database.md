@@ -93,9 +93,39 @@ Each database has its own `pg-dump-<db>-...dmp`. Two ways, and one rule:
 - **Coolify's Import Backups button:** lets you search the S3 files and restores with `pg_restore --single-transaction --clean --if-exists` (all or nothing). The command is **not editable** and targets the container's default database (`POSTGRES_DB`, normally `postgres`), so don't use it for app databases: it would load them into `postgres`. Fine for checking a backup file, or for the default database. Changing `POSTGRES_DB` to redirect it is not worth it: it is also Coolify's default backup database and is used by its health checks.
 - **Rule:** a restore only drops and recreates the objects that are in the dump; it does **not** empty the database. Extra tables stay. To make a database exactly match a backup, restore into an empty one (`DROP SCHEMA public CASCADE; CREATE SCHEMA public;` in that database, or drop and recreate it with its owner as in step 7).
 
-## GUI client (DBeaver etc.)
+## GUI client (DBeaver)
 
-Same laptop key. **SSH tab:** tunnel on, host `<ip>`, port 22, user `root`, auth Public Key, key `~/.ssh/shared_apps_ed25519`. **Main tab:** host = the container's IP (`docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' <pg>`), port `5432`, the app user and database. The container IP can change after a restart. Don't enable "publicly available" as a shortcut.
+Needs the laptop key from steps 1-3. The tunnel resolves hosts **on the droplet**, which can't resolve Docker container names, so the database host is the container's internal IP.
+
+**A. 🟦 Get the container IP** (it changes if the database container is recreated):
+```sh
+docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' <pg>
+```
+
+**B. 💻 In DBeaver:** Database -> New Database Connection -> PostgreSQL (accept the driver download on first use).
+
+| Tab | Field | Value |
+|---|---|---|
+| Main | Host | the IP from step A |
+| Main | Port | `5432` |
+| Main | Database | `<app>` |
+| Main | Username / Password | `<app>_app` / its password |
+| SSH | Use SSH Tunnel | on |
+| SSH | Host/IP, Port, User | `<ip>`, `22`, `root` |
+| SSH | Authentication | Public Key |
+| SSH | Private Key | `~/.ssh/shared_apps_ed25519` (plus its passphrase if you set one) |
+
+Click **Test tunnel configuration** on the SSH tab, then **Test Connection**.
+
+**C. Admin connection (optional):** a second connection with the same SSH tab, Username `postgres`, Database `postgres`; the password is on the `shared-postgres` page in Coolify. Use it only to create roles and databases (step 7); use the app role for everyday work.
+
+| Symptom | Fix |
+|---|---|
+| Tunnel test fails | Confirm the plain `ssh -o IdentitiesOnly=yes -i <key> root@<ip>` from step 3 works; check the key path and passphrase. |
+| Tunnel OK, DB connection refused or times out | The container IP changed: redo step A and edit the Main host. |
+| `password authentication failed` | Wrong role password; reset with `\password <app>_app` (troubleshooting below). |
+
+Don't enable "publicly available" as a shortcut: the firewall only opens 22, 80 and 443, and publishing Postgres to the internet is the common way databases get breached.
 
 ## Troubleshooting
 
