@@ -44,6 +44,18 @@ Same IP (after a replace): open the server entry and **Validate Server**. New IP
 
 Verified once (2026-10-18): a custom-format dump from Postgres 18 restored into `shared-postgres` 18.6; it printed nothing and every table came back owned by the app role.
 
+## Moving to another region (for example `lon1` -> `nyc1`)
+
+Region is a force-new attribute: the droplet **and** the reserved IP are replaced, so you get a new IP, an empty disk, and downtime. The firewall, SSH key, project attachment and the wildcard record are updated in the same apply (the record points at the new IP). Do it when little is running, and treat it like a destroy and rebuild:
+
+1. **Back up** every database and download the files (section 1). Stop the apps in Coolify so nothing writes.
+2. **Change the default** `region` in `environments/shared/variables.tf` through a PR. The `plan` must show `digitalocean_droplet` and `digitalocean_reserved_ip` as `must be replaced` and nothing else surprising; confirm a `s-1vcpu-1gb` is available there first (DigitalOcean's Create Droplet page).
+3. **Merge.** The apply replaces the droplet and IP and prints the new `reserved_ip`. Terraform **destroys the old droplet before creating the new one**, so if the new region has no capacity you are left with no droplet (the same `422 Size is not available` you hit before). That is why step 2 says to confirm availability first and step 1 to have the dumps downloaded. If it does fail, revert the region in a PR (or wait) and re-run `apply`.
+4. **Rebuild on top of it:** wait for cloud-init and verify ([SETUP.md](SETUP.md) section 6), edit the Coolify server's IP and **Validate** it (accept the new host key), start the proxy, re-add your laptop SSH key ([new-app-database.md](docs/new-app-database.md) steps 1-3), then restore each database (section 5), recreate roles first, and redeploy each app ([new-app.md](docs/new-app.md)).
+5. Check each app's URL, run a **Backup now**, and re-check cleanup settings and any cron you added by hand (they are lost with the old disk).
+
+A droplet in a farther region adds latency to Spaces backups (the bucket stays in nyc3), which is fine.
+
 ## Replacing the droplet but keeping the IP
 
 Replace only the droplet; the reserved IP, DNS, firewall and project attachment stay and the Coolify entry keeps working. The disk is still wiped: do sections 1, 4 and 5 around it. Run it **locally** (CI can't pass `-replace`):
