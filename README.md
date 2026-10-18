@@ -6,7 +6,7 @@ unattended-upgrades), a reserved IP, a Cloudflare-restricted firewall, and a pro
 record `*.<base_domain>`. Everything above that (apps, `shared-postgres`, backups) is created
 in Coolify. Terraform never touches Coolify.
 
-**Status:** droplet live in London (`lon1`) since 2026-10-18, as a stopgap while `nyc1` is out of capacity. Next: add the server in Coolify, create `shared-postgres` with backups, deploy apps. Details in the reference.
+**Status:** running. Droplet in London (`lon1`) since 2026-10-18, a stopgap while `nyc1` was out of capacity (moving later: [DESTROY_AND_REBUILD.md](DESTROY_AND_REBUILD.md#moving-to-another-region-for-example-lon1---nyc1)). Coolify manages the server, `shared-postgres` with daily S3 backups, and the first app. Details in the reference.
 
 - **[SETUP.md](SETUP.md)** - guide to bringing it up from this repo: what to configure where, first deploy, Coolify server, Postgres and a tested restore.
 - **[docs/git-flow.md](docs/git-flow.md)** - branching, PR flow, rollbacks, and the exact GitHub settings and rulesets.

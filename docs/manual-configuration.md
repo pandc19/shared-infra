@@ -58,5 +58,32 @@ Each app gets its own database and role; you load data by streaming a dump over 
 - **GitHub source (once per GitHub account or organization):** Sources -> add GitHub -> Register Now -> Install Repositories (only selected repos). Personal and organization accounts need separate sources. Details in [new-app.md](new-app.md#1-github-source-once-per-github-account-or-organization).
 - **Docker cleanup (once):** Servers -> `shared-apps-1` -> Docker Cleanup: frequency `0 4 * * *`, trigger *Run on every schedule*, unused networks **delete**, application images **delete all old images**, unused volumes **keep**. Never delete unused volumes: the cleanup removes stopped containers first and then their volumes, so a stopped `shared-postgres` would lose its data.
 - **Rollback images:** the per-app *Images to keep* (app -> Rollback) only works if the server's *Application images* cleanup option keeps retained images. With "Delete all old images" the page says *Disabled by the server* and you roll back by reverting in git and redeploying. Rolling back does not undo database migrations.
-- **Disk watch:** `df -h /` and `docker system df`; if the build cache keeps growing, add a cron with `docker builder prune -af --filter until=72h`.
+- **Disk watch:** see [Checking disk usage](#checking-disk-usage) below.
 - **Adding an app:** follow [new-app.md](new-app.md). Always use *Private Repository (with GitHub App)*, never the deploy-key option; turn **Build Variable off** for secrets; test on a real hostname, not by IP.
+
+## Checking disk usage
+
+Run on the droplet (Coolify's server Terminal) after a few deploys, and whenever a build fails oddly.
+
+```sh
+df -h /                  # whole disk: watch the Use% column
+docker system df         # what Docker is using, by type
+docker system df -v      # per image / volume detail (long)
+```
+
+`docker system df` prints four rows:
+
+| Row | Meaning | Action |
+|---|---|---|
+| Images | app and base images (`RECLAIMABLE` = unused by a running container) | the daily cleanup removes the reclaimable part |
+| Containers | running and stopped containers | normally tiny |
+| Local Volumes | **data**: `shared-postgres` lives here | never prune; cleanup must stay on *keep unused volumes* |
+| Build Cache | BuildKit layer cache from builds on the droplet | the usual culprit if disk keeps growing |
+
+If `df -h /` climbs toward 80% and Build Cache is large, free it (safe: it only makes the next build slower):
+
+```sh
+docker builder prune -af --filter until=72h
+```
+
+To do that automatically, add a root cron on the droplet (it lives outside Terraform, so re-add it after a rebuild): `0 4 * * * root docker builder prune -af --filter until=72h`. Set a DigitalOcean disk alert too (Monitoring -> Create Alert) so a full disk doesn't surprise you.
