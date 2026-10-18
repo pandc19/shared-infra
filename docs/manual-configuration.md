@@ -112,7 +112,7 @@ Every app gets its **own database and its own login role**, so a bug or leaked p
 6. **Give the app its connection settings** in Coolify's environment variables: host = the Postgres **internal** host Coolify shows for the database (the container's name), port `5432`, user `poketrain_app`, the generated password, database `poketrain`. URL-form: `postgresql://poketrain_app:<password>@<internal-host>:5432/poketrain`. The app must be on the same Coolify destination network as the database (the default for apps on the same server).
 7. **Record it** in the list of databases and owning apps in [DESTROY_AND_REBUILD.md](../DESTROY_AND_REBUILD.md) so a rebuild knows what to recreate. Roles and databases live inside Postgres, so they are recreated by repeating these steps, or come back with a restore only if the backup includes them.
 
-Restoring a dump into an app database is in section 6a.
+Restoring a dump into an app database is in section 6a. The same steps, short and in order with where to run each, are in [new-app-database.md](new-app-database.md).
 
 ## 6a. Restoring a dump from your laptop into an app database
 
