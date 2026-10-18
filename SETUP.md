@@ -6,7 +6,7 @@ The repo already exists on GitHub with the workflow in place. What's left is the
 
 **Order:** DigitalOcean -> Cloudflare -> Coolify key -> GitHub -> first deploy -> verify -> Coolify server -> Postgres.
 
-Conventions: bucket `shared-infra-storage` (state in `tfstate/`, Postgres backups in `pg-backups/`), DO Project `Shared Apps`, droplet `shared-apps-1`, domain `novaej.com`, apps at `<name>.novaej.com` (wildcard `*.novaej.com`; hyphens only, underscores aren't valid in hostnames).
+Conventions: bucket `shared-infra-storage` (state in `tfstate/`, Postgres backups under `data/`, written by Coolify), DO Project `Shared Apps`, droplet `shared-apps-1`, domain `novaej.com`, apps at `<name>.novaej.com` (wildcard `*.novaej.com`; hyphens only, underscores aren't valid in hostnames).
 
 ---
 
@@ -21,7 +21,7 @@ You need four things, all created by hand (Terraform can't create the bucket tha
   - `shared-infra-terraform-state` -> GitHub secrets `SPACES_ACCESS_KEY_ID` / `SPACES_SECRET_ACCESS_KEY` (Terraform reads them as `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`).
   - `shared-infra-coolify-backups` -> only ever pasted into Coolify (section 8).
 
-  Keys are scoped per bucket, not per prefix, so both can technically reach both prefixes. Two keys just let you revoke one independently.
+  Keys are scoped per bucket, not per prefix, so both can technically reach `tfstate/` and `data/`. Two keys just let you revoke one independently.
 
 ## 2. Cloudflare
 
@@ -90,7 +90,7 @@ Expected: `done`, Docker and Compose present, 2G swap, swappiness 10, fail2ban `
 
 **S3 destination.** Storages (S3) -> Add: endpoint `https://nyc3.digitaloceanspaces.com`, region `nyc3`, bucket `shared-infra-storage`, the `shared-infra-coolify-backups` key. Validate.
 
-**shared-postgres.** New Resource -> Database -> PostgreSQL on `shared-apps-1`, name `shared-postgres`, a pinned major version (not `latest`), persistent storage on, not publicly exposed (apps on the same Coolify network use the internal URL). Under Backups, add a schedule (for example daily `0 3 * * *`), enable Save to S3 with the destination above, and set retention. Target `pg-backups/` if your Coolify version has a path/prefix field; if not, Coolify writes its own folders at the bucket root, so check where the first backup lands rather than assuming. Run **Backup now** and confirm a non-empty file appears in Spaces.
+**shared-postgres.** New Resource -> Database -> PostgreSQL on `shared-apps-1`, name `shared-postgres`, a pinned major version (not `latest`), persistent storage on, not publicly exposed (apps on the same Coolify network use the internal URL). Under Backups, add a schedule (for example daily `0 3 * * *`), enable Save to S3 with the destination above, and set retention. Coolify has no prefix field: it writes its own folders at the bucket root, verified on 2026-10-18 as `data/coolify/backups/databases/<team>/shared-postgres-<id>/pg-dump-<db>-<timestamp>-<id>.dmp` (custom-format `pg_dump`). Run **Backup now** and confirm a non-empty file appears there. In Coolify the backup must have Save to S3 on **and** the destination selected on that schedule, otherwise it shows as local and nothing reaches Spaces. Suggested retention: keep 2 backups / 7 days locally (the droplet disk is small) and 14 backups / 30 days on S3.
 
 **Restore test (before any real data).** Create a table with a row, back up, drop the table, restore, and check the row is back:
 
