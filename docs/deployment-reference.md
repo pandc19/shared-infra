@@ -19,7 +19,7 @@ This file is the single list of **what is configured, where, and with which name
 
 | Component | Platform | Name / value |
 |---|---|---|
-| Compute | DigitalOcean droplet | `shared-apps-1`, `s-1vcpu-1gb` (default), region `nyc1` (default), `ubuntu-24-04-x64` |
+| Compute | DigitalOcean droplet | `shared-apps-1`, `s-1vcpu-1gb` (default), region `lon1` (default, London; `nyc1` was out of capacity on 2026-10-18 and is the intended home to return to), `ubuntu-24-04-x64` |
 | Stable address | DigitalOcean reserved IP | created by Terraform, assigned via `digitalocean_reserved_ip_assignment` |
 | Firewall | DigitalOcean Cloud Firewall | `shared-apps-1-fw` |
 | SSH key (DO side) | `digitalocean_ssh_key` | `shared-apps-coolify` (holds Coolify's public key only) |
@@ -49,7 +49,7 @@ A second box later = a new `environments/<name>/` calling the same module with a
 | `coolify_ssh_public_key` | - | variable `COOLIFY_SSH_PUBLIC_KEY` | public key only; validated, private keys are rejected |
 | `cloudflare_zone_id` | - | variable `CLOUDFLARE_ZONE_ID` | zone containing `base_domain` |
 | `base_domain` | - | variable `BASE_DOMAIN` (`novaej.com`) | |
-| `region` | `nyc1` | not wired (edit default or tfvars) | droplet + reserved IP region |
+| `region` | `lon1` | not wired (edit default or tfvars) | droplet + reserved IP region |
 | `droplet_size` | `s-1vcpu-1gb` | not wired (edit default or tfvars) | |
 | `restrict_http_to_cloudflare` | `true` | variable `RESTRICT_HTTP_TO_CLOUDFLARE` (optional) | `false` opens 80/443 to everyone |
 | `project_name` | `Shared Apps` | not wired | must match an existing DO Project exactly |

@@ -8,7 +8,7 @@ base_domain        = "novaej.com"
 cloudflare_zone_id = "00000000000000000000000000000000"
 
 # Optional overrides (defaults shown)
-# region                      = "nyc1"
+# region                      = "lon1"
 # droplet_size                = "s-1vcpu-1gb"
 # project_name                = "Shared Apps"
 # restrict_http_to_cloudflare = true
