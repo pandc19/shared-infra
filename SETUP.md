@@ -69,7 +69,7 @@ If it fails:
 | `init` fails | wrong Spaces key, or bucket not in nyc3 (endpoint in `backend.tf`) |
 | project lookup error | DO Project name isn't exactly `Shared Apps` |
 | Cloudflare auth error | token doesn't cover the `novaej.com` zone |
-| `422 Size is not available in this region` | DigitalOcean has no capacity for that size in that region right now. Wait, or change `region` / `droplet_size` in `environments/shared/variables.tf`. Changing the region replaces the reserved IP (free, automatic). This happened on 2026-10-18 with `s-1vcpu-1gb` in `nyc1`. |
+| `422 Size is not available in this region` | DigitalOcean has no capacity for that size in that region right now. Wait, or change `region` / `droplet_size` in `environments/shared/variables.tf`. Changing the region replaces the reserved IP (free, automatic). This happened on 2026-10-18 with `s-1vcpu-1gb` in `nyc1`; the default is now `lon1`. |
 | public key duplicate | see section 3 |
 
 A failed apply leaves the resources that did get created (SSH key, reserved IP, DNS record) in state; re-running `apply` continues from there. To remove them instead, use the destroy path ([DESTROY_AND_REBUILD.md](DESTROY_AND_REBUILD.md)).

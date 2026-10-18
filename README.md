@@ -6,7 +6,7 @@ unattended-upgrades), a reserved IP, a Cloudflare-restricted firewall, and a pro
 record `*.<base_domain>`. Everything above that (apps, `shared-postgres`, backups) is created
 in Coolify. Terraform never touches Coolify.
 
-**Status:** on standby, nothing provisioned (first apply hit a DigitalOcean capacity error on 2026-10-18; see the reference). The workflow is disabled via the `TERRAFORM_ENABLED` repository variable.
+**Status:** droplet live in London (`lon1`) since 2026-10-18, as a stopgap while `nyc1` is out of capacity. Next: add the server in Coolify, create `shared-postgres` with backups, deploy apps. Details in the reference.
 
 - **[SETUP.md](SETUP.md)** - guide to bringing it up from this repo: what to configure where, first deploy, Coolify server, Postgres and a tested restore.
 - **[docs/deployment-reference.md](docs/deployment-reference.md)** - every name, secret, variable, setting and trigger in one place, plus current status.

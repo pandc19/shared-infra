@@ -2,7 +2,7 @@
 
 Last updated: 2026-10-18
 
-**Status: standby, nothing provisioned.** The repo, GitHub secrets/variables, Spaces bucket and Spaces keys are in place. A first apply (2026-10-18) created the SSH key, reserved IP and DNS record, then failed creating the droplet with `422 Size is not available in this region` (`s-1vcpu-1gb` in `nyc1`, a temporary DigitalOcean capacity message). Those three resources were destroyed through the workflow's destroy path; Terraform state is empty. To resume, see [SETUP.md](../SETUP.md) section 6.
+**Status: droplet live in London (`lon1`) since 2026-10-18** - droplet `shared-apps-1`, reserved IP `209.38.170.24`, firewall, project attachment and wildcard `*.novaej.com` all provisioned (7 resources, via the workflow's apply on `main`). `lon1` is a stopgap: `nyc1` had no `s-1vcpu-1gb` capacity on 2026-10-18 and is the intended home. Moving back replaces the droplet and reserved IP (data on the box is lost), so follow [DESTROY_AND_REBUILD.md](../DESTROY_AND_REBUILD.md) and back up Postgres first. Still to do in Coolify: add the server, create `shared-postgres` with S3 backups and a restore test, deploy apps (first: poketrain at `poketrain.novaej.com`). See [SETUP.md](../SETUP.md) sections 7 and 8.
 
 This file is the single list of **what is configured, where, and with which name**. [SETUP.md](../SETUP.md) is the ordered guide for doing it; [DESTROY_AND_REBUILD.md](../DESTROY_AND_REBUILD.md) is the runbook for tearing down and rebuilding.
 
@@ -154,7 +154,7 @@ Everything is at **repository level** (Settings -> Secrets and variables -> Acti
 | `CLOUDFLARE_ZONE_ID` | Cloudflare zone ID |
 | `BASE_DOMAIN` | `novaej.com` |
 | `RESTRICT_HTTP_TO_CLOUDFLARE` | optional; `false` opens 80/443 to all |
-| `TERRAFORM_ENABLED` | kill switch: every job is skipped unless `true`. Keep `false` while on standby. |
+| `TERRAFORM_ENABLED` | kill switch: every job is skipped unless `true`. Currently `true`, so a push touching `modules/**` or `environments/**` plans and applies. Set `false` to park the project. |
 
 ### Environments
 
@@ -193,4 +193,5 @@ Don't apply from CI and locally against the same state at the same time.
 
 | Date | Event |
 |---|---|
+| 2026-10-18 (later) | Default region changed to `lon1` (PR #2). Merge applied cleanly: 7 added, 0 changed, 0 destroyed. Droplet live, reserved IP `209.38.170.24`. |
 | 2026-10-18 | First apply: SSH key, reserved IP and DNS created; droplet failed with `422 Size is not available in this region` (`s-1vcpu-1gb`, `nyc1`, a DigitalOcean capacity notice). Partial resources destroyed via the workflow's destroy path. Plan for a clean run is 7 resources: SSH key, droplet, reserved IP, assignment, firewall, project resources, DNS record. |
