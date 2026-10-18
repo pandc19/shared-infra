@@ -60,7 +60,7 @@ Each app gets its own database and role; you load data by streaming a dump over 
 3. New Resource -> Application: GitHub source, branch `main`, server `shared-apps-1`, build pack, domain `https://<app>.novaej.com`.
 4. Environment Variables -> bulk "Developer view" -> paste the app's `.env` (never committed). Runtime variables live in Coolify, not GitHub; mark build-time ones as build variables.
 5. Turn on **auto-deploy** (the GitHub App then deploys on push to `main`). Make the app repo's checks required in its own `main` ruleset, since auto-deploy does not wait for CI.
-6. Test before DNS: Coolify's temporary URL or a hosts-file entry for the reserved IP.
+6. Test on a temporary hostname such as `https://<app>-test.novaej.com` (the wildcard already points it at the droplet, proxied) and switch the app's domain to the real one at cutover. Don't test by IP, a hosts-file entry or Coolify's temporary URL: the firewall only accepts Cloudflare's ranges on 80/443, so those requests are dropped.
 7. Migrate data, then cut over: delete or repoint the old host's DNS record so the hostname resolves through the wildcard, proxied. Keep the old host a few days as fallback.
 8. Check the first scheduled backup includes the app's database.
 
