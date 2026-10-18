@@ -41,8 +41,8 @@ Pick the source and repo, branch `main`, server `shared-apps-1`, **Build Pack: D
 ## 5. Settings
 
 - **Auto-deploy:** on. With the GitHub App, a push to `main` triggers a deploy through its webhook.
-- **Images kept for rollback:** a small number (2) in the app's Advanced settings; each deploy leaves an image on the droplet's disk.
-- **Server cleanup (once, not per app):** Servers -> `shared-apps-1` -> Advanced: enable Docker Cleanup with a disk threshold (about 70%) and a daily schedule. Check usage with `docker system df` and `df -h /`.
+- **Server cleanup (once, not per app):** Servers -> `shared-apps-1` -> Docker Cleanup: frequency `0 4 * * *`, application images *delete all old images*, networks delete, **unused volumes keep** (deleting them can destroy a stopped database's data). Each deploy leaves an image on the droplet's disk until the next cleanup; check with `docker system df` and `df -h /`.
+- **Rollback:** per-app retained images are admin-only on Coolify Cloud, so roll back with a git revert and a redeploy.
 
 ## 6. Deploy and verify
 

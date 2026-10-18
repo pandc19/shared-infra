@@ -131,8 +131,8 @@ Created by hand (steps in [manual-configuration.md](manual-configuration.md#1-di
 | Wildcard domain | `https://novaej.com` (only seeds default app domains; set `<name>.novaej.com` per app) |
 | Proxy | Traefik, started by hand after validation (Server -> Proxy -> Start Proxy) |
 | GitHub source | `coolify-pandc19`: GitHub App owned by the personal account, installed on selected repos. An organization needs its own source. Apps use *Private Repository (with GitHub App)*, never a deploy key. |
-| Docker cleanup | server-level, enabled: disk threshold about 70%, daily schedule (record the values actually set here) |
-| Images kept for rollback | per app, 2 |
+| Docker cleanup | server-level (Servers -> `shared-apps-1` -> Docker Cleanup): frequency `0 4 * * *` (04:00 UTC), trigger *Run on every schedule*, unused networks **delete**, application images **delete all old images**, unused volumes **keep** (see warning below) |
+| Images kept for rollback | not available: the per-app setting is admin-only on Coolify Cloud, and cleanup deletes all old images. Roll back with a git revert and redeploy. |
 | Env var rule | secrets are runtime variables only: **Build Variable off** |
 | S3 storage | endpoint `https://nyc3.digitaloceanspaces.com`, region `nyc3`, bucket `shared-infra-storage`, the `shared-infra-coolify-backups` key |
 | Postgres | `shared-postgres`, pinned major version, persistent storage, backup to S3 (no prefix field; lands at `data/coolify/backups/databases/<team>/shared-postgres-<id>/pg-dump-<db>-<timestamp>-<id>.dmp`). Retention: 2 backups / 7 days local, 14 backups / 30 days on S3. Daily cron `0 3 * * *` (server time, UTC). |
@@ -142,6 +142,8 @@ Created by hand (steps in [manual-configuration.md](manual-configuration.md#1-di
 | App | Domain | Database / role | Source repo | Notes |
 |---|---|---|---|---|
 | poketrain | `poketrain.novaej.com` | `poketrain` / `poketrain_app` | `pandc19/poketrain`, branch `main` | Dockerfile build (Next.js standalone, port 3000), entrypoint runs `prisma migrate deploy`, auto-deploy on. Restored from a Neon dump on 2026-10-18. |
+
+**Never set unused volumes to delete.** Cleanup removes stopped containers first, then unused volumes, so a stopped `shared-postgres` would lose its data volume. Backups are daily, so a loss would cost up to a day.
 
 Add a row for every new app ([new-app.md](new-app.md)).
 
