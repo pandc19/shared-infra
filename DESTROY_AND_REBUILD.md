@@ -44,7 +44,7 @@ Either way, confirm Traefik is running, then redeploy each app: their definition
 
 First make sure the S3 storage entry for `shared-infra-storage` still validates in Coolify. Recreate `shared-postgres` on the new server with the **same major version and the same user and database names** as before, and wait until it's running.
 
-Then get the dump: the latest file in `shared-infra-storage`, under `pg-backups/` or wherever Coolify placed it (SETUP.md section 8 says how to check). Restore it with Coolify's Restore action if your version has one for backups and S3 files. Otherwise download the file to the droplet (`scp`, or `curl` a pre-signed URL) or your laptop and run `docker exec -i <pg-container> pg_restore -U <user> -d <db> --clean --if-exists < dump.dmp`, or `psql -U <user> -d <db> < dump.sql` if it's plain SQL.
+Then get the dump: the latest file in `shared-infra-storage`, under `data/coolify/backups/databases/<team>/shared-postgres-<id>/` (files named `pg-dump-<db>-<timestamp>-<id>.dmp`). Restore it with Coolify's Restore action if your version has one for backups and S3 files. Otherwise download the file to the droplet (`scp`, or `curl` a pre-signed URL) or your laptop and run `docker exec -i <pg-container> pg_restore -U <user> -d <db> --clean --if-exists < dump.dmp`. Coolify's `.dmp` files are `pg_dump` custom format, so `pg_restore` is the right tool, not `psql`.
 
 The exact commands you verified in the restore test (SETUP.md section 8) belong here, so you don't have to rediscover them during an outage: `____`
 

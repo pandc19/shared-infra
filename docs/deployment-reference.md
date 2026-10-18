@@ -69,7 +69,7 @@ The workflow maps GitHub values to `TF_VAR_*` environment variables. `terraform.
 | Bucket | `shared-infra-storage` |
 | State key | `tfstate/shared/terraform.tfstate` |
 | Credentials | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` = the `shared-infra-terraform-state` Spaces key |
-| Backup prefix | `pg-backups/` is reserved for Coolify |
+| Backup location | Coolify writes under `data/` (see Coolify section); `tfstate/` is Terraform's |
 
 ## DigitalOcean - droplet and firewall
 
@@ -131,7 +131,7 @@ Created by hand (API -> Spaces Keys -> Generate New Key -> Limited Access, bucke
 | Server | name `shared-apps-1`, IP = `reserved_ip` output, port 22, user `root`, build server off |
 | Wildcard domain | `https://novaej.com` (only seeds default app domains; set `<name>.novaej.com` per app) |
 | S3 storage | endpoint `https://nyc3.digitaloceanspaces.com`, region `nyc3`, bucket `shared-infra-storage`, the `shared-infra-coolify-backups` key |
-| Postgres | `shared-postgres`, pinned major version, persistent storage, scheduled backup to S3 (target `pg-backups/` if the form allows a prefix) |
+| Postgres | `shared-postgres`, pinned major version, persistent storage, scheduled backup to S3 (no prefix field; lands at `data/coolify/backups/databases/<team>/shared-postgres-<id>/pg-dump-<db>-<timestamp>-<id>.dmp`). Retention: 2 backups / 7 days local, 14 backups / 30 days on S3. Daily cron `0 3 * * *` (server time, UTC). |
 
 ## GitHub - secrets, variables, environments
 
