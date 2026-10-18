@@ -1,3 +1,4 @@
+# First plan: triggers the PR plan job (no resource changes).
 terraform {
   required_version = ">= 1.7"
   required_providers {
