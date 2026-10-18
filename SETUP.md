@@ -1,181 +1,106 @@
-# First-time setup
+# Setup guide
 
-Do these in order. Tick each box as you go. Terraform only builds the box; everything in
-Coolify (sections 7-9) is manual by design.
+How to bring `shared-infra` up from this repo. It explains **what to configure and where**, in order. The exact names and values of every secret, variable and setting are in [docs/deployment-reference.md](docs/deployment-reference.md); this guide doesn't repeat them.
 
-**Status so far:** code pushed to GitHub; DO token, Project, Spaces bucket (nyc3, empty) and both Spaces keys done; Cloudflare token set; Cloudflare zone ID and Coolify public key set as GitHub variables; GitHub secrets/variables are in place except `BASE_DOMAIN` (verify) and `TERRAFORM_ENABLED` (deliberately unset, so the workflow does nothing yet). Still to do: Cloudflare SSL mode, GitHub environments, first apply (section 6), then Coolify (sections 7-9).
+The repo already exists on GitHub with the workflow in place. What's left is the accounts, keys and settings around it, then a first apply, then Coolify.
 
-Two ways to run Terraform; pick one and don't mix them:
-- **GitHub Actions** (sections 8 and 6A): values come from GitHub secrets/variables, no `terraform.tfvars` needed.
-- **Local** (sections 5 and 6B): values come from `terraform.tfvars` plus exported env vars.
+**Order:** DigitalOcean -> Cloudflare -> Coolify key -> GitHub -> first deploy -> verify -> Coolify server -> Postgres.
 
-Values used throughout: bucket `shared-infra-storage` (state in `tfstate/`, Postgres backups in
-`pg-backups/`), DO Project `Shared Apps`, droplet `shared-apps-1`, domain `novaej.com`,
-apps at `<name>.novaej.com` (wildcard `*.novaej.com`; use hyphens, not underscores - underscores aren't valid in hostnames).
+Conventions: bucket `shared-infra-storage` (state in `tfstate/`, Postgres backups in `pg-backups/`), DO Project `Shared Apps`, droplet `shared-apps-1`, domain `novaej.com`, apps at `<name>.novaej.com` (wildcard `*.novaej.com`; hyphens only, underscores aren't valid in hostnames).
 
 ---
 
-## 1. Accounts and local tools
+## 1. DigitalOcean
 
-- [x] DigitalOcean account, Cloudflare account (with `novaej.com` as an active zone), Coolify Cloud account, GitHub repo `pandc19/shared-infra`.
-- [ ] Terraform >= 1.7 (`terraform version`). Only needed for the local route.
-- [ ] `git`, `ssh`. Optional: `doctl` and `s3cmd`/`aws` CLI for poking at Spaces.
-- [x] Code is pushed to https://github.com/pandc19/shared-infra (branch `main`). The workflow is disabled until `TERRAFORM_ENABLED=true`.
-      Someone setting this up again later would `git clone` it.
+You need four things, all created by hand (Terraform can't create the bucket that holds its own state):
 
-## 2. DigitalOcean
+- **An API token** (API -> Tokens, read+write). It becomes the GitHub secret `DO_TOKEN`.
+- **A Project named `Shared Apps`.** Terraform looks it up by name and fails the plan if it's missing or spelled differently.
+- **A Spaces bucket `shared-infra-storage` in nyc3**, private, no CDN. Leave it empty; Terraform writes `tfstate/` itself and Coolify writes the backups. Optionally enable versioning so an overwritten state file is recoverable.
+- **Two limited Spaces keys.** They are *not* in the bucket's file browser. Go to the account-level API page, **Spaces Keys** tab (https://cloud.digitalocean.com/account/api/spaces), **Generate New Key**, choose **Limited Access**, select `shared-infra-storage`, grant Read/Write/Delete. The secret is shown once. Create:
+  - `shared-infra-terraform-state` -> GitHub secrets `SPACES_ACCESS_KEY_ID` / `SPACES_SECRET_ACCESS_KEY` (Terraform reads them as `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`).
+  - `shared-infra-coolify-backups` -> only ever pasted into Coolify (section 8).
 
-- [x] **API token** - already created; GitHub secret `DO_TOKEN` already set. (Control Panel -> API -> Tokens, read+write.)
-- [ ] Local route only: env var `TF_VAR_do_token` (same token value).
-- [x] **DO Project** `Shared Apps` already exists. Terraform only looks it up by name and fails if it is missing or misspelled.
-- [x] **Spaces bucket** `shared-infra-storage` already exists in **nyc3** and is empty. Nothing to create: Terraform doesn't manage it (it can't create the bucket that holds its own state).
-      `backend.tf` already points at `https://nyc3.digitaloceanspaces.com`. Keep the bucket private, no CDN. Optionally enable versioning on the bucket so an overwritten state file is recoverable.
-- [x] **Limited Spaces keys** (created; `shared-infra-terraform-state` is also in GitHub). You create these by hand; neither Terraform nor GitHub does. They are *not* in the bucket's file browser (the "create folder" screen) - they live under the account-level API page:
-      DigitalOcean control panel -> **API** (left sidebar, near the bottom) -> **Spaces Keys** tab (direct link: https://cloud.digitalocean.com/account/api/spaces) -> **Generate New Key**.
-      Choose **Limited Access**, pick bucket `shared-infra-storage`, and give it **Read/Write/Delete**; the name is just a label. The secret is shown **once**, so copy both values immediately. Create **two** keys:
-  - [x] `shared-infra-terraform-state` for Terraform. Local env vars: `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`.
-        GitHub secrets: `SPACES_ACCESS_KEY_ID` and `SPACES_SECRET_ACCESS_KEY` (the workflow maps them to the `AWS_*` names).
-  - [x] `shared-infra-coolify-backups` for Coolify (section 9). Keep it for the Coolify form; it does not go in Terraform or GitHub.
+  Keys are scoped per bucket, not per prefix, so both can technically reach both prefixes. Two keys just let you revoke one independently.
 
-  Spaces keys are scoped per bucket, not per prefix, so both keys can technically read/write `tfstate/` and `pg-backups/`.
-  Two keys only let you revoke one without breaking the other. Don't give the Coolify key to anything else.
+## 2. Cloudflare
 
-## 3. Cloudflare
+- **An API token** with `Zone : DNS : Edit` on the `novaej.com` zone -> GitHub secret `CLOUDFLARE_TOKEN`. Terraform needs it to create the wildcard record. You may reuse a token from another project if it covers this zone; a separate token per project limits the damage if one leaks.
+- **The zone ID** (zone Overview page, right sidebar, API section) -> GitHub variable `CLOUDFLARE_ZONE_ID`. Not secret.
+- **SSL/TLS -> Overview -> Full (strict).** The wildcard is proxied and Coolify's proxy serves real Let's Encrypt certificates, so strict is correct; Flexible causes redirect loops and Full skips validation. The mode is zone-wide: before switching, make sure other proxied sites on `novaej.com` have valid origin certificates, or they'll return 526.
+- Nothing to do for the edge certificate: Universal SSL covers `*.novaej.com`, exactly the one-level `<name>.novaej.com` pattern. (A two-level pattern like `<name>.apps.novaej.com` would need paid Advanced Certificate Manager.)
 
-- [x] **API token** - already created; GitHub secret `CLOUDFLARE_TOKEN` already set. It needs `Zone : DNS : Edit` on the `novaej.com` zone.
-- [ ] Local route only: env var `TF_VAR_cloudflare_token` (same token value).
-- [ ] Terraform needs this token to create the wildcard DNS record, so keep it. If you reuse Comprobify's token, it must cover the `novaej.com` zone; a separate token per project limits the damage if one leaks.
-- [x] **Zone ID** - set as GitHub variable `CLOUDFLARE_ZONE_ID`. (Where: zone Overview page, right sidebar, API section.) Local route: also `cloudflare_zone_id` in `terraform.tfvars`. Not secret.
-- [ ] **SSL/TLS -> Overview -> mode = Full (strict).** Required: the wildcard record is proxied, and Coolify's proxy (Traefik) serves valid Let's Encrypt certificates on the origin.
-      "Flexible" would cause redirect loops and send traffic to the origin unencrypted; "Full" (non-strict) skips cert validation.
-- [ ] **Edge certificate:** nothing to do. Cloudflare's free Universal SSL covers `novaej.com` and `*.novaej.com`, which is exactly the one-level `<name>.novaej.com` pattern used here. (A two-level pattern like `<name>.apps.novaej.com` would need paid Advanced Certificate Manager; avoid it.)
-- [ ] Existing records in the zone (www, api, MX, other projects' subdomains) are unaffected: explicit records always win over the wildcard. Any name you haven't created explicitly will now resolve to this droplet, which Traefik answers with a 404 until an app claims it.
+Existing records (`www`, `api`, MX, other projects) keep working; explicit records win over the wildcard. Unclaimed names resolve to the droplet and get a 404 from Traefik.
 
-### Let's Encrypt and the Cloudflare-only firewall
+**Let's Encrypt vs the firewall.** By default only Cloudflare's ranges can reach 80/443. HTTP-01 certificate issuance still works while the app's record is proxied, because the validator talks to Cloudflare. If you ever create a **DNS-only** record, issuance fails: set the GitHub variable `RESTRICT_HTTP_TO_CLOUDFLARE=false` (or `restrict_http_to_cloudflare = false` locally) and apply, which opens 80/443 to everyone. Port 22 is open to the world either way, since Coolify Cloud has no fixed IPs.
 
-`restrict_http_to_cloudflare = true` (the default) lets only Cloudflare's IPv4 ranges reach ports 80/443. Let's Encrypt HTTP-01 validation
-**still works while records are proxied**: the validator connects to Cloudflare, which forwards `/.well-known/acme-challenge/` to your origin from its own ranges.
+## 3. Coolify Cloud: the SSH key
 
-It breaks if you ever create a **DNS-only** (grey cloud) record for an app: the validator then connects straight to the droplet and the firewall drops it.
-In that case set `restrict_http_to_cloudflare = false` (tfvars or GitHub variable `RESTRICT_HTTP_TO_CLOUDFLARE=false`) and apply, which opens 80/443 to everyone.
-With the default, hitting the raw IP bypasses Cloudflare's WAF/DDoS layer entirely; the firewall is what prevents that. Port 22 is open to the world in both modes (Coolify Cloud has no fixed IPs).
+Coolify connects to the droplet as **root** with a key it generates. Terraform only ever receives the public half; never generate keys in Terraform (the private key would land in state).
 
-## 4. Coolify Cloud: generate the SSH key
+In Coolify Cloud: Keys & Tokens -> Private Keys -> Add -> generate an ED25519 key (name it `shared-apps-1`). Copy the **public key** (one line, `ssh-ed25519 AAAA...`) into the GitHub variable `COOLIFY_SSH_PUBLIC_KEY`. Don't paste the private key anywhere; the Terraform variable validates the format and rejects private keys.
 
-Coolify SSHes into the droplet **as root** with a key it generates. Terraform only ever receives the **public** half.
+DigitalOcean rejects a public key already registered in the account. If apply reports a duplicate, delete the stale key in Settings -> Security.
 
-- [x] Coolify Cloud -> Keys & Tokens -> Private Keys -> Add. Generate a new ED25519 key (e.g. name `shared-apps-1`).
-- [x] Copy the **public key** (one line, `ssh-ed25519 AAAA... coolify`). Done: set as GitHub variable `COOLIFY_SSH_PUBLIC_KEY` (local route: `coolify_ssh_public_key` in tfvars). Not secret.
-- [ ] Never paste the private key anywhere. The variable validates the format and rejects private keys.
-- [ ] DigitalOcean rejects a public key that is already registered in the account (even under another name). If apply says the key is a duplicate, remove the old one in Settings -> Security.
+## 4. GitHub
 
-## 5. Local configuration (local route only; skip if using GitHub Actions)
+The repo is https://github.com/pandc19/shared-infra. Configure it under Settings.
 
-The GitHub workflow does not use `terraform.tfvars` (it is git-ignored and never reaches the runner). It passes the GitHub secrets/variables to Terraform as `TF_VAR_*` / `AWS_*` env vars.
+- **Secrets and variables -> Actions**, repository level (not inside Environments, because the jobs run in two environments and repository-level values are visible to both). The full list with values is in the [reference](docs/deployment-reference.md#github---secrets-variables-environments): secrets `DO_TOKEN`, `CLOUDFLARE_TOKEN`, `SPACES_ACCESS_KEY_ID`, `SPACES_SECRET_ACCESS_KEY`; variables `COOLIFY_SSH_PUBLIC_KEY`, `CLOUDFLARE_ZONE_ID`, `BASE_DOMAIN`, and optionally `RESTRICT_HTTP_TO_CLOUDFLARE`.
+- **Environments:** `shared-infra` with no reviewers (plan/apply), and `shared-infra-destroy` with required reviewers and deployment branches limited to `main`. Create the destroy one first and check its rule: if GitHub auto-creates it on first use, it has no reviewers and a destroy would run ungated. Neither environment holds secrets.
+- **Variable `TERRAFORM_ENABLED`:** the kill switch. Every job is skipped unless it is `true`, so keep it `false` (or unset) until you want the workflow to run, and set it back to `false` when parking the project.
 
-- [ ] `cd environments/shared && cp terraform.tfvars.example terraform.tfvars` and fill in `coolify_ssh_public_key`, `base_domain = "novaej.com"`, `cloudflare_zone_id`. (`terraform.tfvars` is git-ignored.)
-- [ ] Export the secrets in your shell (don't put them in tfvars):
+**When the workflow runs** once enabled: a PR or push to `main` that changes `modules/**`, `environments/**` or the workflow file (docs-only changes never trigger it). PR -> plan only. Push to `main` -> plan, then apply. Manual (Actions -> Terraform -> Run workflow) -> `plan`, `apply` or `destroy`, which ignores the path filter. Destroy needs two approvals: one before the `-destroy` plan, one after you've read it.
 
-  ```sh
-  export TF_VAR_do_token="dop_v1_..."
-  export TF_VAR_cloudflare_token="..."
-  export AWS_ACCESS_KEY_ID="<shared-infra-terraform-state key id>"
-  export AWS_SECRET_ACCESS_KEY="<its secret>"
-  ```
+## 5. Running Terraform locally instead (optional)
 
-## 6. Init, plan, apply
+Everything above works through GitHub. To run from a laptop instead, see "Running Terraform locally" in the reference: copy `environments/shared/terraform.tfvars.example` to `terraform.tfvars`, export `TF_VAR_do_token`, `TF_VAR_cloudflare_token`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, then `terraform init && terraform plan`. `terraform.tfvars` is git-ignored and never used by the workflow. Don't apply from both places at once.
 
-Expected plan: create the SSH key, droplet, reserved IP + assignment, firewall, project resources and one Cloudflare A record (`*.novaej.com`). Nothing destroyed.
+## 6. First deploy
 
-### 6A. Via GitHub Actions (finish section 8 first)
+1. Set `TERRAFORM_ENABLED=true`.
+2. Open a PR that touches a file under `modules/` or `environments/` (a comment is enough). The `plan` job runs and creates nothing. Read it: the expected plan is **7 to add, 0 to change, 0 to destroy** (SSH key, droplet, reserved IP, assignment, firewall, project resources, DNS record).
+3. Merge. `plan` runs again, then `apply` builds everything. (Or run the workflow manually with `apply` on `main`.) The end of the `apply` log prints `reserved_ip` and `coolify_server_settings`.
 
-- [ ] Open a throwaway PR touching a file under `modules/` or `environments/` (e.g. a comment). The `plan` job runs; read the plan in its log.
-- [ ] Merge to `main`. `plan` runs again, then `apply` creates everything. (Or Actions -> Terraform -> Run workflow -> `apply` on `main`.)
-- [ ] Read the reserved IP and the Coolify values at the end of the `apply` job log (`reserved_ip`, `coolify_server_settings` outputs).
-- [ ] Failure at `init`: wrong Spaces key or endpoint. Failure at `plan` with a project lookup error: the DO Project name doesn't match `Shared Apps`.
+If it fails:
 
-### 6B. Locally (needs section 5)
+| Symptom | Cause |
+|---|---|
+| `init` fails | wrong Spaces key, or bucket not in nyc3 (endpoint in `backend.tf`) |
+| project lookup error | DO Project name isn't exactly `Shared Apps` |
+| Cloudflare auth error | token doesn't cover the `novaej.com` zone |
+| `422 Size is not available in this region` | DigitalOcean has no capacity for that size in that region right now. Wait, or change `region` / `droplet_size` in `environments/shared/variables.tf`. Changing the region replaces the reserved IP (free, automatic). This happened on 2026-10-18 with `s-1vcpu-1gb` in `nyc1`. |
+| public key duplicate | see section 3 |
 
-- [ ] `terraform init` (connects to the Spaces backend; failure here = wrong endpoint or wrong key).
-- [ ] `terraform plan`
-- [ ] `terraform apply`
-- [ ] `terraform output coolify_server_settings` and note the reserved IP.
+A failed apply leaves the resources that did get created (SSH key, reserved IP, DNS record) in state; re-running `apply` continues from there. To remove them instead, use the destroy path ([DESTROY_AND_REBUILD.md](DESTROY_AND_REBUILD.md)).
 
-### Verify the box (either route)
+## 7. Verify the box
 
-- [ ] Wait ~3-5 minutes for cloud-init, then:
+Wait 3-5 minutes for cloud-init. The simplest check is Coolify's *Validate Server* (next section), which proves SSH as root and Docker. For a direct check you need the matching private key locally (viewable in Coolify -> Keys & Tokens; load it with `ssh-add`, never commit it):
 
-  ```sh
-  ssh root@<reserved-ip> 'cloud-init status --wait; ls /var/lib/cloud/shared-infra-provisioned; docker --version; docker compose version; swapon --show; sysctl vm.swappiness; systemctl is-active fail2ban; sshd -T | grep -E "^(permitrootlogin|passwordauthentication|allowusers|maxauthtries|logingracetime)"'
-  ```
+```sh
+ssh root@<reserved-ip> 'cloud-init status --wait; ls /var/lib/cloud/shared-infra-provisioned; docker --version; docker compose version; swapon --show; sysctl vm.swappiness; systemctl is-active fail2ban; sshd -T | grep -E "^(permitrootlogin|passwordauthentication|allowusers|maxauthtries|logingracetime)"'
+```
 
-  This needs the matching **private** key on your machine (you can view it in Coolify -> Keys & Tokens; treat it as a secret and load it with `ssh-add`, don't commit it).
-  If you'd rather not copy it out, skip this and rely on Coolify's *Validate Server* in section 7, then run the commands from Coolify's server terminal. Expected: `done`, Docker + Compose present, 2G swap, swappiness 10, fail2ban `active`, `permitrootlogin prohibit-password`, `passwordauthentication no`, `allowusers root`, `maxauthtries 3`, `logingracetime 30`.
-- [ ] If provisioning looks wrong: `ssh root@<ip> 'tail -n 100 /var/log/cloud-init-output.log'`.
+Expected: `done`, Docker and Compose present, 2G swap, swappiness 10, fail2ban `active`, `permitrootlogin prohibit-password`, `passwordauthentication no`, `allowusers root`, `maxauthtries 3`, `logingracetime 30`. If something looks wrong: `ssh root@<ip> 'tail -n 100 /var/log/cloud-init-output.log'`.
 
-## 7. Add the server in Coolify Cloud
+## 8. Coolify: add the server, then Postgres
 
-- [ ] Servers -> Add. Use the values from `terraform output coolify_server_settings`: name `shared-apps-1`, IP = reserved IP, port 22, user `root`, the key from section 4, wildcard domain `https://novaej.com` (Coolify only uses this to generate default app domains; you can set any `<name>.novaej.com` per app). Build server off.
-- [ ] Click **Validate Server & Install Docker Engine**. It should find Docker already installed. Fix anything it flags.
-- [ ] Confirm the proxy (Traefik) starts and ports 80/443 are bound.
-- [ ] Smoke test: deploy any trivial app (or a static site), give it a domain like `hello.novaej.com`, and load it over HTTPS. Certificate errors point at section 3 (SSL mode).
+**Server.** Servers -> Add, with the values from `terraform output coolify_server_settings` (the apply log): name `shared-apps-1`, IP = the reserved IP, port 22, user `root`, the key from section 3, wildcard domain `https://novaej.com` (only seeds default app domains; each app can use any `<name>.novaej.com`), build server off. Run **Validate Server & Install Docker Engine**; it should find Docker already installed. Confirm the proxy (Traefik) starts. Smoke test with a trivial app on `hello.novaej.com` over HTTPS; certificate trouble points back at the SSL mode in section 2.
 
-## 8. (Optional) GitHub Actions
+**S3 destination.** Storages (S3) -> Add: endpoint `https://nyc3.digitaloceanspaces.com`, region `nyc3`, bucket `shared-infra-storage`, the `shared-infra-coolify-backups` key. Validate.
 
-This is the GitHub route. Skip it if you run Terraform locally, and don't apply from both places.
-The workflow is pushed disabled: every job is skipped until the repository variable `TERRAFORM_ENABLED` is `true`.
-Do this section before 6A.
+**shared-postgres.** New Resource -> Database -> PostgreSQL on `shared-apps-1`, name `shared-postgres`, a pinned major version (not `latest`), persistent storage on, not publicly exposed (apps on the same Coolify network use the internal URL). Under Backups, add a schedule (for example daily `0 3 * * *`), enable Save to S3 with the destination above, and set retention. Target `pg-backups/` if your Coolify version has a path/prefix field; if not, Coolify writes its own folders at the bucket root, so check where the first backup lands rather than assuming. Run **Backup now** and confirm a non-empty file appears in Spaces.
 
-**When it runs** (once enabled): PR or push to `main` that changes files under `modules/**`, `environments/**` or the workflow file itself - docs-only changes never trigger it. PR -> plan only. Push to `main` -> plan, then apply. Manual runs (Actions -> Terraform -> Run workflow: `plan`, `apply`, `destroy`) ignore the path filter. The `ignore_changes` on the droplet means cloud-init edits won't rebuild the box.
+**Restore test (before any real data).** Create a table with a row, back up, drop the table, restore, and check the row is back:
 
-Put **everything at repository level** (Settings -> Secrets and variables -> Actions). Do **not** put these in the Environments: the jobs run in two environments (`shared-infra`, `shared-infra-destroy`), and repository-level values are visible to both, while environment-level ones would need duplicating.
-
-| Where | Name | Value |
-|---|---|---|
-| Repository secret | `DO_TOKEN` | DO API token (already set) |
-| Repository secret | `CLOUDFLARE_TOKEN` | Cloudflare token (already set) |
-| Repository secret | `SPACES_ACCESS_KEY_ID` | key ID of `shared-infra-terraform-state` |
-| Repository secret | `SPACES_SECRET_ACCESS_KEY` | its secret |
-| Repository variable | `COOLIFY_SSH_PUBLIC_KEY` | public key from Coolify (section 4) |
-| Repository variable | `CLOUDFLARE_ZONE_ID` | zone ID |
-| Repository variable | `BASE_DOMAIN` | `novaej.com` |
-| Repository variable | `RESTRICT_HTTP_TO_CLOUDFLARE` | optional; `false` opens 80/443 to all |
-| Repository variable | `TERRAFORM_ENABLED` | `true` only when ready to let the workflow run |
-
-- [x] `DO_TOKEN` and `CLOUDFLARE_TOKEN` are set. Confirm they are *repository* secrets; if you created them inside an Environment, re-add them at repository level.
-- [x] `SPACES_ACCESS_KEY_ID`, `SPACES_SECRET_ACCESS_KEY`, `COOLIFY_SSH_PUBLIC_KEY` and `CLOUDFLARE_ZONE_ID` are set.
-- [ ] Add `BASE_DOMAIN` = `novaej.com` if you haven't (leave `TERRAFORM_ENABLED` unset until the environments below exist).
-- [ ] Settings -> Environments -> **`shared-infra`**: create it with **no** required reviewers (used by PR plans and push applies). It holds no secrets.
-- [ ] Settings -> Environments -> **`shared-infra-destroy`**: add yourself under *Required reviewers* (and a second person if you have one; on a personal repo you can approve your own runs unless you tick "prevent self-review"). Restrict deployment branches to `main`. It holds no secrets.
-- [ ] When everything above is done, set `TERRAFORM_ENABLED=true`, then follow 6A.
-- [ ] Behavior once enabled: PR -> plan; merge to `main` -> plan then apply; Actions -> Terraform -> Run workflow -> `destroy` -> approval 1, read the `plan -destroy` output, approval 2.
-
-## 9. Create `shared-postgres` with S3 backups
-
-- [ ] In Coolify: Project -> Environment -> New Resource -> Database -> PostgreSQL, on server `shared-apps-1`. Name `shared-postgres`. Pick a pinned major version (not `latest`).
-- [ ] Don't enable "Make it publicly available" unless you need it; apps on the same Coolify destination network connect via the internal URL Coolify shows. Enable persistent storage (the default).
-- [ ] Add the S3 destination: Coolify -> Storages (S3) -> Add:
-  - Endpoint `https://nyc3.digitaloceanspaces.com` (match the bucket's region), Region `nyc3`, Bucket `shared-infra-storage`
-  - Access key / secret: the `shared-infra-coolify-backups` key from section 2
-  - Press Validate.
-- [ ] On `shared-postgres` -> Backups -> Add: schedule (e.g. daily `0 3 * * *`), enable **Save to S3** with the destination above, set retention.
-  Target location is `pg-backups/`. If your Coolify version has a path/prefix field, enter `pg-backups`; if it doesn't, Coolify writes its own folder structure at the bucket root. Check where the first backup lands (below) and adjust expectations rather than assuming.
-- [ ] Press **Backup now**. In the Spaces UI, confirm a dump file appeared and its size is non-zero.
-
-### Restore test (do this before any real data goes in)
-
-- [ ] Create junk data: connect to the DB (Coolify terminal on the database, or `docker exec -it <pg-container> psql -U <user> -d <db>`) and run
-      `CREATE TABLE restore_check (id int, note text); INSERT INTO restore_check VALUES (1, 'before backup');`
-- [ ] Run **Backup now**; wait for success; confirm the new file in Spaces.
-- [ ] Destroy the evidence: `DROP TABLE restore_check;`
-- [ ] Restore the dump:
-  - If your Coolify version has a Restore action on the backup, use it.
-  - Otherwise download the file from Spaces to the droplet (or your laptop) and restore by hand. Coolify's Postgres dumps are typically `pg_dump` custom-format `.dmp` files:
-    `docker exec -i <pg-container> pg_restore -U <user> -d <db> --clean --if-exists < pg-dump-file.dmp`
-    (use `psql ... < file.sql` instead if the file is plain SQL; check the extension).
-- [ ] Verify: `SELECT * FROM restore_check;` returns the row. Then `DROP TABLE restore_check;`.
-- [ ] Note the exact working restore commands for your Coolify version in `DESTROY_AND_REBUILD.md` section 5. You don't want to discover them during an outage.
+1. In the DB (Coolify terminal or `docker exec -it <pg-container> psql -U <user> -d <db>`): `CREATE TABLE restore_check (id int, note text); INSERT INTO restore_check VALUES (1, 'before backup');`
+2. Backup now; confirm the new file in Spaces.
+3. `DROP TABLE restore_check;`
+4. Restore: use Coolify's Restore action on the backup if your version has one. Otherwise download the file and run `docker exec -i <pg-container> pg_restore -U <user> -d <db> --clean --if-exists < dump.dmp` (Coolify's dumps are typically `pg_dump` custom format; use `psql ... < file.sql` for plain SQL, check the extension).
+5. `SELECT * FROM restore_check;` returns the row; then drop the table.
+6. Write the exact working restore commands into [DESTROY_AND_REBUILD.md](DESTROY_AND_REBUILD.md) section 5 so you don't discover them during an outage.
 
 ## Done when
 
-`curl -I https://hello.novaej.com` works with a valid certificate, `shared-postgres` has a successful S3 backup, and the restore test passed.
+`https://hello.novaej.com` loads with a valid certificate, `shared-postgres` has a successful S3 backup, and the restore test passed.

@@ -6,7 +6,10 @@ unattended-upgrades), a reserved IP, a Cloudflare-restricted firewall, and a pro
 record `*.<base_domain>`. Everything above that (apps, `shared-postgres`, backups) is created
 in Coolify. Terraform never touches Coolify.
 
-- **[SETUP.md](SETUP.md)** - first-time, ordered checklist of every manual step, through to a tested Postgres restore.
+**Status:** on standby, nothing provisioned (first apply hit a DigitalOcean capacity error on 2026-10-18; see the reference). The workflow is disabled via the `TERRAFORM_ENABLED` repository variable.
+
+- **[SETUP.md](SETUP.md)** - guide to bringing it up from this repo: what to configure where, first deploy, Coolify server, Postgres and a tested restore.
+- **[docs/deployment-reference.md](docs/deployment-reference.md)** - every name, secret, variable, setting and trigger in one place, plus current status.
 - **[DESTROY_AND_REBUILD.md](DESTROY_AND_REBUILD.md)** - what a destroy loses, final backup, rebuild, re-add to Coolify, restore.
 
 ## Layout
@@ -15,6 +18,7 @@ in Coolify. Terraform never touches Coolify.
 modules/droplet/        droplet, SSH key, reserved IP, firewall, project attachment, DNS, cloud-init
 environments/shared/    backend (DO Spaces), providers, variables, outputs, terraform.tfvars.example
 .github/workflows/      plan on PR, apply on main, manual destroy (two approvals)
+docs/                   deployment-reference.md (all names, secrets, variables, settings)
 ```
 
 A second box later = a new `environments/<name>/` calling the same module with a different name and backend key.
