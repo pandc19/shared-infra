@@ -1,0 +1,14 @@
+# Copy to terraform.tfvars (git-ignored). Tokens do NOT go here: export
+# TF_VAR_do_token and TF_VAR_cloudflare_token instead (see SETUP.md).
+
+# PUBLIC key from Coolify Cloud -> Keys & Tokens -> Private Keys. One line, no private key.
+coolify_ssh_public_key = "ssh-ed25519 AAAA...replace-me coolify"
+
+base_domain        = "novaej.com"
+cloudflare_zone_id = "00000000000000000000000000000000"
+
+# Optional overrides (defaults shown)
+# region                      = "nyc1"
+# droplet_size                = "s-1vcpu-1gb"
+# project_name                = "Shared Apps"
+# restrict_http_to_cloudflare = true

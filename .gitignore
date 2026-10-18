@@ -1,0 +1,19 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfplan
+tfplan
+
+# Variable files can hold secrets; only the example is committed.
+# (.terraform.lock.hcl IS committed on purpose - it pins provider versions.)
+*.tfvars
+*.tfvars.json
+!terraform.tfvars.example
+
+# Local junk
+.DS_Store
+.env
+.env.*

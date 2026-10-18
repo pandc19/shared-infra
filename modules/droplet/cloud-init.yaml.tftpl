@@ -1,0 +1,77 @@
+#cloud-config
+# Builds a clean box for Coolify Cloud: Docker, swap, SSH hardening, fail2ban,
+# unattended-upgrades. Nothing else - Coolify owns everything above this.
+# Root's authorized key is installed by DigitalOcean from digitalocean_ssh_key.
+
+write_files:
+  # SSH hardening as a drop-in, loaded by the main sshd_config's
+  # `Include /etc/ssh/sshd_config.d/*.conf` (standard on Ubuntu). sshd uses the FIRST
+  # value it sees for a keyword and reads drop-ins in lexical order, so the 00- prefix
+  # guarantees this file wins over cloud-init's own 50-cloud-init.conf.
+  # Coolify connects as root, so root login is allowed by key only (prohibit-password)
+  # and AllowUsers root. The key is the one generated in Coolify Cloud.
+  - path: /etc/ssh/sshd_config.d/00-shared-infra-hardening.conf
+    permissions: '0644'
+    content: |
+      PermitRootLogin prohibit-password
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PubkeyAuthentication yes
+      UsePAM yes
+      MaxAuthTries 3
+      LoginGraceTime 30
+      AllowUsers root
+
+  # Explicit systemd backend: Ubuntu 24.04 cloud images may not ship /var/log/auth.log.
+  - path: /etc/fail2ban/jail.d/sshd.local
+    permissions: '0644'
+    content: |
+      [sshd]
+      enabled = true
+      backend = systemd
+      maxretry = 5
+      findtime = 10m
+      bantime = 1h
+
+  - path: /etc/sysctl.d/99-swappiness.conf
+    permissions: '0644'
+    content: |
+      vm.swappiness=10
+
+runcmd:
+  # Swap is a backstop against transient spikes on a small box, not a substitute for
+  # right-sizing. swappiness=10 keeps the kernel preferring RAM.
+  - |
+    if [ ! -f /swapfile ]; then
+      fallocate -l ${swap_size} /swapfile
+      chmod 600 /swapfile
+      mkswap /swapfile
+      swapon /swapfile
+      echo '/swapfile none swap sw 0 0' >> /etc/fstab
+    fi
+  - sysctl --system
+
+  # All installs happen here, not via cloud-init's package_* directives: those cannot
+  # take a lock timeout, and a boot-time apt-daily run can make them fail. Every apt-get
+  # call uses DPkg::Lock::Timeout so it waits out the lock instead.
+  - apt-get -o DPkg::Lock::Timeout=300 update
+  - apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl gnupg git jq wget openssl
+
+  # Docker Engine + Compose plugin from Docker's official apt repo (not get.docker.com).
+  # The list file is written only after the key exists, so `apt update` never sees an
+  # unsigned repo. Suite and arch come from the running system.
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - chmod a+r /etc/apt/keyrings/docker.asc
+  - |
+    . /etc/os-release
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $VERSION_CODENAME stable" > /etc/apt/sources.list.d/docker.list
+  - apt-get -o DPkg::Lock::Timeout=300 update
+  - apt-get -o DPkg::Lock::Timeout=300 install -y fail2ban unattended-upgrades docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+  - systemctl enable --now docker
+  - systemctl enable --now fail2ban
+  - dpkg-reconfigure -f noninteractive unattended-upgrades
+  # Validate before restarting: a bad sshd config must not lock Coolify out.
+  - sshd -t && systemctl restart ssh
+  - touch /var/lib/cloud/shared-infra-provisioned

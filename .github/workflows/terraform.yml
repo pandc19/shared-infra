@@ -1,0 +1,125 @@
+name: Terraform
+
+# Pull request  -> plan (read-only preview, same-repo PRs only: fork PRs get no secrets).
+# Push to main  -> plan, then apply.
+# Manual run    -> choose an action:
+#                    plan    dry run
+#                    apply   plan, then apply
+#                    destroy plan -destroy, then destroy (two approval gates, below)
+#
+# Kill switch: every job is skipped unless the repository variable TERRAFORM_ENABLED is
+# 'true', so the workflow can sit in the repo (and be pushed) without running anything.
+#
+# Secrets (repository secrets): DO_TOKEN, CLOUDFLARE_TOKEN,
+#   SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY (the state bucket key, exposed to
+#   Terraform's S3 backend as AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY).
+# ALL secrets and variables live at repository level (Settings -> Secrets and variables ->
+# Actions), none in the Environments, so every job sees them.
+# Variables (repository variables, not secret): COOLIFY_SSH_PUBLIC_KEY,
+#   CLOUDFLARE_ZONE_ID, BASE_DOMAIN. Optional: RESTRICT_HTTP_TO_CLOUDFLARE ("false" to open 80/443).
+#
+# Destroy: plan-destroy and apply-destroy both use the `shared-infra-destroy` GitHub
+# Environment. With required reviewers set on it, that is two separate approvals: one
+# before the -destroy plan runs, and a second AFTER its output is in the logs and before
+# the real `destroy -auto-approve`. A single combined job could only gate once, blind.
+# Normal plan/apply use the `shared-infra` environment, which must have no reviewers.
+
+on:
+  pull_request:
+    paths: ['modules/**', 'environments/**', '.github/workflows/terraform.yml']
+  push:
+    branches: [main]
+    paths: ['modules/**', 'environments/**', '.github/workflows/terraform.yml']
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'plan (dry run), apply (plan then apply) or destroy (two approvals)'
+        required: true
+        default: plan
+        type: choice
+        options: [plan, apply, destroy]
+
+# One Terraform run at a time; never cancel one midway (state lock / partial apply).
+concurrency:
+  group: terraform-shared
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  TF_DIR: environments/shared
+  TF_IN_AUTOMATION: 'true'
+  TF_VAR_do_token: ${{ secrets.DO_TOKEN }}
+  TF_VAR_cloudflare_token: ${{ secrets.CLOUDFLARE_TOKEN }}
+  TF_VAR_coolify_ssh_public_key: ${{ vars.COOLIFY_SSH_PUBLIC_KEY }}
+  TF_VAR_cloudflare_zone_id: ${{ vars.CLOUDFLARE_ZONE_ID }}
+  TF_VAR_base_domain: ${{ vars.BASE_DOMAIN }}
+  TF_VAR_restrict_http_to_cloudflare: ${{ vars.RESTRICT_HTTP_TO_CLOUDFLARE || 'true' }}
+  AWS_ACCESS_KEY_ID: ${{ secrets.SPACES_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.SPACES_SECRET_ACCESS_KEY }}
+
+jobs:
+  plan:
+    # Everything except a manual destroy, and not for fork PRs (no access to secrets).
+    if: >-
+      vars.TERRAFORM_ENABLED == 'true' &&
+      github.event.inputs.action != 'destroy' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    environment: shared-infra
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4
+        with:
+          terraform_version: 1.7.5
+      - run: terraform -chdir=${{ env.TF_DIR }} init -input=false
+      - run: terraform -chdir=${{ env.TF_DIR }} fmt -check -recursive
+      - run: terraform -chdir=${{ env.TF_DIR }} validate
+      - run: terraform -chdir=${{ env.TF_DIR }} plan -input=false
+
+  apply:
+    needs: plan
+    # Only from main: a push, or a manual run of action=apply on main.
+    if: >-
+      vars.TERRAFORM_ENABLED == 'true' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event.inputs.action == 'apply')
+    runs-on: ubuntu-latest
+    environment: shared-infra
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4
+        with:
+          terraform_version: 1.7.5
+      - run: terraform -chdir=${{ env.TF_DIR }} init -input=false
+      - run: terraform -chdir=${{ env.TF_DIR }} apply -input=false -auto-approve
+
+  # Approval 1: before the preview runs.
+  plan-destroy:
+    if: vars.TERRAFORM_ENABLED == 'true' && github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: shared-infra-destroy
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4
+        with:
+          terraform_version: 1.7.5
+      - run: terraform -chdir=${{ env.TF_DIR }} init -input=false
+      - run: terraform -chdir=${{ env.TF_DIR }} plan -destroy -input=false
+
+  # Approval 2: after reading the -destroy plan above. Take a final Postgres backup first
+  # (DESTROY_AND_REBUILD.md) - destroying the droplet destroys the data on it.
+  apply-destroy:
+    needs: plan-destroy
+    if: vars.TERRAFORM_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: shared-infra-destroy
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4
+        with:
+          terraform_version: 1.7.5
+      - run: terraform -chdir=${{ env.TF_DIR }} init -input=false
+      - run: terraform -chdir=${{ env.TF_DIR }} destroy -input=false -auto-approve
