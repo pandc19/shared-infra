@@ -53,7 +53,7 @@ Add the server (`shared-apps-1`, reserved IP, port 22, user `root`, your key), v
 Run the restore test on a throwaway database before real data ([manual-configuration.md](docs/manual-configuration.md#5-databases-per-app-restores-laptop-access)).
 
 ## 8. Apps
-Per app: create its database and role, load data, back it up ([new-app-database.md](docs/new-app-database.md)); then deploy and cut DNS over ([manual-configuration.md](docs/manual-configuration.md#6-deploying-an-app)).
+Once: enable Docker cleanup on the server and register a GitHub source for each GitHub account or organization ([manual-configuration.md](docs/manual-configuration.md#6-github-source-cleanup-deploying-an-app)). Then, per app, follow **[docs/new-app.md](docs/new-app.md)**: database and role ([new-app-database.md](docs/new-app-database.md)), create the application from the GitHub App source, runtime-only secrets, auto-deploy, verify, back up, and protect the app repo's `main`. Test on a real hostname: the firewall blocks access by IP.
 
 ## Done when
 An app loads over HTTPS on `<name>.novaej.com`, `shared-postgres` has a successful S3 backup, and a restore test passed.

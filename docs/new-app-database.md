@@ -85,6 +85,14 @@ Prisma apps: deploy with `prisma migrate deploy`, never `migrate dev` or `migrat
 
 ---
 
+## Restoring from a Spaces backup
+
+Each database has its own `pg-dump-<db>-...dmp`. Two ways, and one rule:
+
+- **Over SSH (any database):** download the file and use step 9 (`pg_restore ... -d <app>`). Use this for app databases and for dumps from other hosts.
+- **Coolify's Import Backups button:** lets you search the S3 files and restores with `pg_restore --single-transaction --clean --if-exists` (all or nothing). The command is **not editable** and targets the container's default database (`POSTGRES_DB`, normally `postgres`), so don't use it for app databases: it would load them into `postgres`. Fine for checking a backup file, or for the default database. Changing `POSTGRES_DB` to redirect it is not worth it: it is also Coolify's default backup database and is used by its health checks.
+- **Rule:** a restore only drops and recreates the objects that are in the dump; it does **not** empty the database. Extra tables stay. To make a database exactly match a backup, restore into an empty one (`DROP SCHEMA public CASCADE; CREATE SCHEMA public;` in that database, or drop and recreate it with its owner as in step 7).
+
 ## GUI client (DBeaver etc.)
 
 Same laptop key. **SSH tab:** tunnel on, host `<ip>`, port 22, user `root`, auth Public Key, key `~/.ssh/shared_apps_ed25519`. **Main tab:** host = the container's IP (`docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' <pg>`), port `5432`, the app user and database. The container IP can change after a restart. Don't enable "publicly available" as a shortcut.

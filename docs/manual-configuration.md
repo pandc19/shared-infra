@@ -53,15 +53,9 @@ Each app gets its own database and role; you load data by streaming a dump over 
 
 **Restore test (once, before real data):** create a throwaway database, add it to the backup selection, add a row, back up, drop the table, restore that database's `.dmp` with `pg_restore -d <db> --clean --if-exists`, check the row. A `pg_dump` custom file holds **one** database, so each database restores from its own file. Record the working command in [DESTROY_AND_REBUILD.md](../DESTROY_AND_REBUILD.md).
 
-## 6. Deploying an app
+## 6. GitHub source, cleanup, deploying an app
 
-1. Coolify -> Sources -> add a GitHub App with access to the app's repo.
-2. Create its database and role ([new-app-database.md](new-app-database.md)).
-3. New Resource -> Application: GitHub source, branch `main`, server `shared-apps-1`, build pack, domain `https://<app>.novaej.com`.
-4. Environment Variables -> bulk "Developer view" -> paste the app's `.env` (never committed). Runtime variables live in Coolify, not GitHub; mark build-time ones as build variables.
-5. Turn on **auto-deploy** (the GitHub App then deploys on push to `main`). Make the app repo's checks required in its own `main` ruleset, since auto-deploy does not wait for CI.
-6. Test on a temporary hostname such as `https://<app>-test.novaej.com` (the wildcard already points it at the droplet, proxied) and switch the app's domain to the real one at cutover. Don't test by IP, a hosts-file entry or Coolify's temporary URL: the firewall only accepts Cloudflare's ranges on 80/443, so those requests are dropped.
-7. Migrate data, then cut over: delete or repoint the old host's DNS record so the hostname resolves through the wildcard, proxied. Keep the old host a few days as fallback.
-8. Check the first scheduled backup includes the app's database.
-
-A 1 GB droplet builds slowly and can run out of memory (2G swap helps). On OOM failures, resize or build elsewhere.
+- **GitHub source (once per GitHub account or organization):** Sources -> add GitHub -> Register Now -> Install Repositories (only selected repos). Personal and organization accounts need separate sources. Details in [new-app.md](new-app.md#1-github-source-once-per-github-account-or-organization).
+- **Docker cleanup (once):** Servers -> `shared-apps-1` -> Advanced -> enable Docker Cleanup, disk threshold about 70%, daily schedule (for example `0 4 * * *`). Prunes unused images and build cache.
+- **Per app:** images kept for rollback = 2 (app Advanced settings). Every deploy leaves an image on the droplet's disk.
+- **Adding an app:** follow [new-app.md](new-app.md). Always use *Private Repository (with GitHub App)*, never the deploy-key option; turn **Build Variable off** for secrets; test on a real hostname, not by IP.

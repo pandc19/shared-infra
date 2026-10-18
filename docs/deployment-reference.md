@@ -2,7 +2,7 @@
 
 Last updated: 2026-10-18
 
-See also: [SETUP.md](../SETUP.md) (order), [manual-configuration.md](manual-configuration.md) (hand steps), [new-app-database.md](new-app-database.md) (per-app DB), [git-flow.md](git-flow.md) (branching, GitHub settings), [DESTROY_AND_REBUILD.md](../DESTROY_AND_REBUILD.md).
+See also: [SETUP.md](../SETUP.md) (order), [new-app.md](new-app.md) (add an app), [manual-configuration.md](manual-configuration.md) (hand steps), [new-app-database.md](new-app-database.md) (per-app DB), [git-flow.md](git-flow.md) (branching, GitHub settings), [DESTROY_AND_REBUILD.md](../DESTROY_AND_REBUILD.md).
 
 **Status:** droplet live in London (`lon1`) since 2026-10-18 (reserved IP `209.38.170.24`, a snapshot: the Terraform output is the source of truth). `lon1` is a stopgap because `nyc1` had no `s-1vcpu-1gb` capacity; moving back replaces the droplet and wipes it, so back up first ([DESTROY_AND_REBUILD.md](../DESTROY_AND_REBUILD.md)). This file lists what is configured, where, and under which name.
 
@@ -129,8 +129,21 @@ Created by hand (steps in [manual-configuration.md](manual-configuration.md#1-di
 | Public key | in GitHub variable `COOLIFY_SSH_PUBLIC_KEY` and installed as root's authorized key by Terraform |
 | Server | name `shared-apps-1`, IP = `reserved_ip` output, port 22, user `root`, build server off |
 | Wildcard domain | `https://novaej.com` (only seeds default app domains; set `<name>.novaej.com` per app) |
+| Proxy | Traefik, started by hand after validation (Server -> Proxy -> Start Proxy) |
+| GitHub source | `coolify-pandc19`: GitHub App owned by the personal account, installed on selected repos. An organization needs its own source. Apps use *Private Repository (with GitHub App)*, never a deploy key. |
+| Docker cleanup | server-level, enabled: disk threshold about 70%, daily schedule (record the values actually set here) |
+| Images kept for rollback | per app, 2 |
+| Env var rule | secrets are runtime variables only: **Build Variable off** |
 | S3 storage | endpoint `https://nyc3.digitaloceanspaces.com`, region `nyc3`, bucket `shared-infra-storage`, the `shared-infra-coolify-backups` key |
 | Postgres | `shared-postgres`, pinned major version, persistent storage, backup to S3 (no prefix field; lands at `data/coolify/backups/databases/<team>/shared-postgres-<id>/pg-dump-<db>-<timestamp>-<id>.dmp`). Retention: 2 backups / 7 days local, 14 backups / 30 days on S3. Daily cron `0 3 * * *` (server time, UTC). |
+
+## Apps
+
+| App | Domain | Database / role | Source repo | Notes |
+|---|---|---|---|---|
+| poketrain | `poketrain.novaej.com` | `poketrain` / `poketrain_app` | `pandc19/poketrain`, branch `main` | Dockerfile build (Next.js standalone, port 3000), entrypoint runs `prisma migrate deploy`, auto-deploy on. Restored from a Neon dump on 2026-10-18. |
+
+Add a row for every new app ([new-app.md](new-app.md)).
 
 ## GitHub - secrets, variables, environments
 

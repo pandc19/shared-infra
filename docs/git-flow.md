@@ -76,4 +76,6 @@ The repo is **public**: Actions logs are public. Secrets are masked; variables a
 | `shared-infra` | none | any (PR plans run from feature branches) |
 | `shared-infra-destroy` | you (plus a second person if available) | `main` only |
 
+**App repos:** the repos you deploy through Coolify need their own `main` ruleset (PR required, CI check required, no bypass), because auto-deploy doesn't wait for CI: see [new-app.md](new-app.md#8-policies-for-the-apps-own-repo).
+
 **Security:** secret scanning and push protection (free on public repos), Dependabot alerts, optionally Dependabot updates for `github-actions` and `terraform`.
