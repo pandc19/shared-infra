@@ -28,7 +28,7 @@ variable "base_domain" {
 variable "region" {
   description = "DigitalOcean region slug for the droplet and reserved IP."
   type        = string
-  default     = "nyc1"
+  default     = "lon1"
 }
 
 variable "droplet_size" {
