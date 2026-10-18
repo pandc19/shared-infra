@@ -1,85 +1,68 @@
 # Destroy and rebuild runbook
 
+How to tear the box down, bring it back, and get Postgres and the apps running again. Names and values are in [docs/deployment-reference.md](docs/deployment-reference.md); first-time setup is in [SETUP.md](SETUP.md).
+
 ## What a destroy loses
 
-Destroying the droplet deletes its disk. **Everything on the box is gone**, including:
+Destroying the droplet deletes its disk, so **everything on the box is gone**: the `shared-postgres` data (all databases), every app's Docker volumes, Coolify's proxy config on the box, deployed containers and images, and local logs.
 
-- the `shared-postgres` data (all databases) and every app's Docker volumes,
-- Coolify's proxy config on the box, deployed containers and images, local logs.
+What survives: the Spaces bucket and its backups (Terraform doesn't manage it), the Terraform state, your Coolify Cloud account with its server/app/database *definitions*, the DO Project, the Cloudflare zone and its other records, the SSH key inside Coolify, and the GitHub secrets and variables.
 
-What survives: the Spaces bucket and its backups (not managed by Terraform), the
-Terraform state, your Coolify Cloud account and its server/app/database *definitions*, the DO Project,
-the Cloudflare zone, and the SSH key in Coolify.
+A full destroy also removes the reserved IP and the wildcard DNS record, so the rebuilt box gets a **new IP**. If you only want a fresh droplet on the **same IP**, do a replace instead (last section).
 
-`terraform destroy` also removes the reserved IP and the wildcard DNS record. If you only want a new
-droplet but the **same IP**, do a replace (section 6 below) instead of a destroy.
+## 1. Before you destroy: take a final backup
 
-## 1. Before you destroy: final backup
+**Do not destroy until a final Postgres backup is confirmed in Spaces and you've downloaded a copy.** The data exists nowhere else.
 
-- [ ] In Coolify: `shared-postgres` -> Backups -> **Backup now** with Save to S3 enabled. Wait for success.
-- [ ] Open Spaces (`shared-infra-storage`) and confirm the new file's timestamp and non-zero size. Download a copy to your laptop too.
-- [ ] Stop writes first if apps are live (stop the apps in Coolify) so the dump is final.
-- [ ] Back up anything else with state: app volumes (Coolify -> the app -> Persistent Storage; copy out what matters), and record env vars/secrets for each app (Coolify keeps definitions, but export a copy of anything you can't regenerate).
-- [ ] Optional paranoia: `ssh root@<ip> 'docker exec <pg-container> pg_dumpall -U <user>' > shared-postgres-final.sql`
+Stop the apps in Coolify first so nothing writes during the dump. Then, on `shared-postgres` -> Backups, run **Backup now** with Save to S3 enabled and wait for it to succeed. Open the `shared-infra-storage` bucket and check that the new file has a fresh timestamp and a non-zero size; download a copy to your laptop as well. If you want a second, independent dump, pull a plain one over SSH with `docker exec <pg-container> pg_dumpall -U <user>` redirected to a local file.
+
+Back up anything else that has state. For each app, copy out whatever matters from its Persistent Storage in Coolify, and keep a copy of any env vars or secrets you can't regenerate: Coolify keeps the definitions, but not the contents of the volumes.
 
 ## 2. Destroy
 
-Via GitHub (exercised on 2026-10-18 to clean up a failed first apply): Actions -> Terraform -> Run workflow -> branch `main` -> action `destroy`.
-Approve the `plan-destroy` job (gate 1), read the `Plan: 0 to add, 0 to change, N to destroy` line in its log, then approve `apply-destroy` (gate 2).
-It only runs from `main`, only when the repository variable `TERRAFORM_ENABLED` is `true`, and only if the `shared-infra-destroy` Environment has its required-reviewer rule
-(without it the two jobs run with no approval at all). Pushes and PRs can never trigger a destroy.
+The normal route is the workflow (it was used on 2026-10-18 to clean up a failed first apply). Go to Actions -> Terraform -> Run workflow, pick branch `main`, action `destroy`. You'll be asked to approve twice: first the `plan-destroy` job, then, after reading its log, `apply-destroy`. Check the plan line (`Plan: 0 to add, 0 to change, N to destroy`) matches what you expect before the second approval.
 
-Locally: `cd environments/shared && terraform plan -destroy`, read it, then `terraform destroy`.
+A destroy can only start from `main`, only while the repository variable `TERRAFORM_ENABLED` is `true`, and only through a manual run; pushes and PRs can never trigger one. The two approvals exist only if the `shared-infra-destroy` Environment has its required-reviewer rule. Without the rule the jobs run with no approval at all, so check it before relying on this.
 
-Not touched by destroy: the DO Project (only looked up), the bucket, Cloudflare zone and other DNS records, GitHub secrets/variables.
-After a full destroy the state is empty; setting `TERRAFORM_ENABLED=false` while parked stops an accidental push from re-applying.
+To destroy locally instead, run `terraform plan -destroy` in `environments/shared`, read it, then `terraform destroy`.
+
+The DO Project (only looked up), the bucket, the Cloudflare zone and its other records, and the GitHub configuration are untouched. Afterwards the state is empty. Set `TERRAFORM_ENABLED=false` while the project is parked so an accidental push can't re-apply.
 
 ## 3. Recreate
 
-- [ ] Run the workflow with `apply` on `main` (or `terraform apply` locally). A destroy+apply gives a **new reserved IP**; the wildcard record is recreated pointing at it.
-- [ ] Reuse the same Coolify key. `coolify_ssh_public_key` is unchanged. If DigitalOcean complains the key already exists, delete the stale entry in Settings -> Security.
-- [ ] Wait for cloud-init and run the verification command in [SETUP.md](SETUP.md) section 7.
-- [ ] Note the new IP: `terraform output reserved_ip`.
+Set `TERRAFORM_ENABLED=true` if you turned it off, then run the workflow with `apply` on `main` (or `terraform apply` locally). The new reserved IP and the wildcard record are created together. The Coolify public key in `COOLIFY_SSH_PUBLIC_KEY` is unchanged, so the new droplet accepts the same Coolify key; if DigitalOcean complains the key already exists, delete the stale entry in Settings -> Security.
+
+When the apply finishes, read the new `reserved_ip` from its log, wait for cloud-init, and run the verification from [SETUP.md](SETUP.md) section 7. If the apply fails on capacity (`Size is not available in this region`), see the failure table in SETUP.md section 6.
 
 ## 4. Re-add the server in Coolify
 
-Two options:
+After a replace that kept the IP, the existing Coolify server entry still works: open it and run **Validate Server**, which reinstalls the proxy. After a full destroy the IP changed, so edit the server's IP to the new one first (clear the old SSH host key if Coolify prompts, because the new droplet has a different one), or delete the old entry once its resources are moved or removed and add a new one as in SETUP.md section 8.
 
-- **Same Coolify server entry (preferred if the IP stayed the same, e.g. after a replace):** the entry still works. Open it and press **Validate Server**, which reinstalls the proxy.
-  If the IP changed, edit the server's IP to the new one first. Also clear the old host key if prompted. The new droplet has a different SSH host key.
-- **New entry:** delete the old server in Coolify (after moving or removing its resources) and add a new one as in SETUP.md section 8.
-
-Then: Validate, check Traefik is running, and **redeploy** each app. Their definitions are in Coolify, but the containers and volumes are gone.
-Recreate `shared-postgres` if it was tied to the old server (Coolify may need a fresh database resource on the new server).
+Either way, confirm Traefik is running, then redeploy each app: their definitions are in Coolify, but the containers and volumes are gone. `shared-postgres` may need to be recreated as a fresh database resource on the new server.
 
 ## 5. Restore Postgres from Spaces
 
-- [ ] Make sure the S3 storage entry (`shared-infra-storage`) still validates in Coolify.
-- [ ] Recreate `shared-postgres` on the new server with the **same major version and the same DB user/name** as before, and wait until it is running.
-- [ ] Get the dump: the latest file in `shared-infra-storage` (under `pg-backups/` or wherever Coolify placed it, see SETUP.md section 8). Download it to the droplet (`scp`, or `curl` a pre-signed URL) or to your laptop.
-- [ ] Restore:
-  - If Coolify offers Restore on the backup/S3 file, use it.
-  - Otherwise: `docker exec -i <pg-container> pg_restore -U <user> -d <db> --clean --if-exists < dump.dmp` (or `psql -U <user> -d <db> < dump.sql` for plain SQL).
-  - Fill in the exact commands you verified during the restore test in SETUP.md section 8 here: `____`
-- [ ] Verify row counts or a known record in each database before pointing apps at it.
-- [ ] Re-enable the backup schedule on the new database resource and run **Backup now** once to confirm S3 still works.
-- [ ] Redeploy apps, check each URL over HTTPS.
+First make sure the S3 storage entry for `shared-infra-storage` still validates in Coolify. Recreate `shared-postgres` on the new server with the **same major version and the same user and database names** as before, and wait until it's running.
 
-## 6. Replace the droplet but keep the IP
+Then get the dump: the latest file in `shared-infra-storage`, under `pg-backups/` or wherever Coolify placed it (SETUP.md section 8 says how to check). Restore it with Coolify's Restore action if your version has one for backups and S3 files. Otherwise download the file to the droplet (`scp`, or `curl` a pre-signed URL) or your laptop and run `docker exec -i <pg-container> pg_restore -U <user> -d <db> --clean --if-exists < dump.dmp`, or `psql -U <user> -d <db> < dump.sql` if it's plain SQL.
 
-For rebuilding the box without changing the IP or DNS:
+The exact commands you verified in the restore test (SETUP.md section 8) belong here, so you don't have to rediscover them during an outage: `____`
+
+Before pointing apps at the restored database, check row counts or a known record in each database. Then re-enable the backup schedule on the new database resource and run **Backup now** once to confirm S3 still works. Finally redeploy the apps and check each URL over HTTPS.
+
+## Replacing the droplet but keeping the IP
+
+To rebuild just the box, keeping the reserved IP, DNS, firewall and project attachment, replace only the droplet. Only the droplet and the reserved IP assignment change; the Coolify server entry keeps working. The disk is still wiped, so do the backup (section 1), re-add (section 4) and restore (section 5) around it.
 
 ```sh
 cd environments/shared
 terraform apply -replace='module.shared.digitalocean_droplet.this'
 ```
 
-The reserved IP, firewall, DNS record and project attachment survive (only the droplet and the reserved IP assignment change), and the Coolify server entry keeps working. The data on the disk is still lost, so do sections 1, 4 and 5 around it. Locally this is the command above; in CI, a manual `apply` can't pass `-replace`, so use the local route for replacements.
+This has to run locally: a manual workflow `apply` can't pass `-replace`.
 
-**Why edits don't rebuild automatically:** the droplet has `ignore_changes = [user_data, ssh_keys]`. Without that, any edit to `cloud-init.yaml.tftpl` or the Coolify public key would make Terraform plan a
-destroy+create of the droplet and wipe Postgres. Cloud-init changes only take effect on a droplet you deliberately replace as above.
+This is also the only way cloud-init changes take effect. The droplet has `ignore_changes = [user_data, ssh_keys]` on purpose: without it, any edit to `cloud-init.yaml.tftpl` or the Coolify public key would make Terraform plan a destroy and recreate, wiping Postgres on an innocent PR.
 
 ### Rotating the Coolify SSH key without a rebuild
 
-Add the new public key to `/root/.ssh/authorized_keys` on the droplet (via an existing key), switch the server to the new key in Coolify and validate, remove the old line, then update `coolify_ssh_public_key`.
-(The `ignore_changes` on `ssh_keys` means Terraform won't try to replace the droplet.)
+Add the new public key to `/root/.ssh/authorized_keys` on the droplet through the existing key, switch the server to the new key in Coolify and validate it, then remove the old line and update `COOLIFY_SSH_PUBLIC_KEY` (and `coolify_ssh_public_key` if you use tfvars). Because of the `ignore_changes` on `ssh_keys`, Terraform won't try to replace the droplet.
