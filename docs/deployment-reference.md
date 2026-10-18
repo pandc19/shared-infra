@@ -2,18 +2,17 @@
 
 Last updated: 2026-10-18
 
-**Status: droplet live in London (`lon1`) since 2026-10-18** - droplet `shared-apps-1`, reserved IP `209.38.170.24`, firewall, project attachment and wildcard `*.novaej.com` all provisioned (7 resources, via the workflow's apply on `main`). `lon1` is a stopgap: `nyc1` had no `s-1vcpu-1gb` capacity on 2026-10-18 and is the intended home. Moving back replaces the droplet and reserved IP (data on the box is lost), so follow [DESTROY_AND_REBUILD.md](../DESTROY_AND_REBUILD.md) and back up Postgres first. Still to do in Coolify: add the server, create `shared-postgres` with S3 backups and a restore test, deploy apps (first: poketrain at `poketrain.novaej.com`). See [SETUP.md](../SETUP.md) sections 7 and 8.
+See also: [SETUP.md](../SETUP.md) (order), [new-app.md](new-app.md) (add an app), [manual-configuration.md](manual-configuration.md) (hand steps), [new-app-database.md](new-app-database.md) (per-app DB), [git-flow.md](git-flow.md) (branching, GitHub settings), [DESTROY_AND_REBUILD.md](../DESTROY_AND_REBUILD.md).
 
-This file is the single list of **what is configured, where, and with which name**. [SETUP.md](../SETUP.md) is the ordered guide for doing it; [DESTROY_AND_REBUILD.md](../DESTROY_AND_REBUILD.md) is the runbook for tearing down and rebuilding.
+**Status:** droplet live in London (`lon1`) since 2026-10-18 (reserved IP `209.38.170.24`, a snapshot: the Terraform output is the source of truth). `lon1` is a stopgap because `nyc1` had no `s-1vcpu-1gb` capacity; moving back replaces the droplet and wipes it, so back up first ([DESTROY_AND_REBUILD.md](../DESTROY_AND_REBUILD.md)). This file lists what is configured, where, and under which name.
 
 ## Architecture
 
-- **Terraform** provisions one DigitalOcean droplet (`shared-apps-1`), its firewall, an SSH key holding Coolify's public key, a reserved IP, the project attachment, and one Cloudflare DNS record. State lives in a DigitalOcean Spaces bucket.
-- **Coolify Cloud** is the control plane (hosted by Coolify). It connects to the droplet over SSH **as root** with a key Coolify generated. Everything above the box (apps, `shared-postgres`, backups, the reverse proxy) is created in Coolify. Terraform never touches Coolify and does not use the Coolify provider.
-- **The droplet** is a plain Ubuntu 24.04 image. Cloud-init installs Docker (Docker's official apt repo), a 2G swap file, SSH hardening, fail2ban and unattended-upgrades, and nothing else.
-- **Cloudflare** proxies `*.novaej.com` to the reserved IP. Coolify's proxy (Traefik) on the droplet obtains Let's Encrypt certificates for each app.
+- **Terraform** builds one DigitalOcean droplet (`shared-apps-1`) with its firewall, SSH key, reserved IP, project attachment and one Cloudflare DNS record. State lives in a Spaces bucket. It never touches Coolify and doesn't use the Coolify provider.
+- **Coolify Cloud** is the hosted control plane. It SSHes into the droplet **as root** with its own key and manages apps, `shared-postgres` and backups.
+- **The droplet** is plain Ubuntu 24.04; cloud-init adds Docker, swap, SSH hardening, fail2ban, unattended-upgrades.
+- **Cloudflare** proxies `*.novaej.com` to the reserved IP; Coolify's proxy (Traefik) gets Let's Encrypt certificates per app.
 - **GitHub Actions** runs Terraform: plan on PR, apply on `main`, manual destroy behind two approvals.
-- **Postgres** (`shared-postgres`) is created in Coolify on the droplet. Its backups go to the Spaces bucket.
 
 ## Components and platforms
 
@@ -109,18 +108,18 @@ No deploy user, no sudo model, no app code, no docker-compose: Coolify owns ever
 | API token | `Zone : DNS : Edit` on the `novaej.com` zone; used only by Terraform |
 | Zone ID | zone Overview page, API section |
 
-Explicit records (`www`, `api`, `MX`, other projects) always win over the wildcard. Any unclaimed name resolves to the droplet and Traefik returns 404.
+Explicit records (`www`, `api`, `MX`, an old host's CNAME) win over the wildcard. Unclaimed names resolve to the droplet and Traefik returns 404.
 
-**Let's Encrypt and the firewall.** With 80/443 restricted to Cloudflare, HTTP-01 works while records are **proxied** (the validator hits Cloudflare, which forwards the challenge). A **DNS-only** record breaks it: set `restrict_http_to_cloudflare = false` and apply first.
+**Let's Encrypt and the firewall.** With 80/443 restricted to Cloudflare, HTTP-01 works for **proxied** records. A **DNS-only** record breaks it: set `restrict_http_to_cloudflare = false` and apply first.
 
 ## DigitalOcean Spaces keys
 
-Created by hand (API -> Spaces Keys -> Generate New Key -> Limited Access, bucket `shared-infra-storage`, Read/Write/Delete). Keys are per bucket, not per prefix; two keys exist only so one can be revoked independently.
+Created by hand (steps in [manual-configuration.md](manual-configuration.md#1-digitalocean)), limited to the bucket with Read/Write/Delete. Keys are per bucket, not per prefix; two exist so one can be revoked alone.
 
-| Key name | Used by | Where the values live |
+| Key name | Used by | Values live in |
 |---|---|---|
 | `shared-infra-terraform-state` | Terraform state backend | GitHub secrets `SPACES_ACCESS_KEY_ID`, `SPACES_SECRET_ACCESS_KEY`; locally `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
-| `shared-infra-coolify-backups` | Coolify S3 destination for `shared-postgres` | Coolify only |
+| `shared-infra-coolify-backups` | Coolify S3 destination | Coolify only |
 
 ## Coolify Cloud
 
@@ -130,8 +129,23 @@ Created by hand (API -> Spaces Keys -> Generate New Key -> Limited Access, bucke
 | Public key | in GitHub variable `COOLIFY_SSH_PUBLIC_KEY` and installed as root's authorized key by Terraform |
 | Server | name `shared-apps-1`, IP = `reserved_ip` output, port 22, user `root`, build server off |
 | Wildcard domain | `https://novaej.com` (only seeds default app domains; set `<name>.novaej.com` per app) |
+| Proxy | Traefik, started by hand after validation (Server -> Proxy -> Start Proxy) |
+| GitHub source | `coolify-pandc19`: GitHub App owned by the personal account, installed on selected repos. An organization needs its own source. Apps use *Private Repository (with GitHub App)*, never a deploy key. |
+| Docker cleanup | server-level (Servers -> `shared-apps-1` -> Docker Cleanup): frequency `0 4 * * *` (04:00 UTC), trigger *Run on every schedule*, unused networks **delete**, application images **delete all old images**, unused volumes **keep** (see warning below) |
+| Images kept for rollback | not available: the per-app setting is admin-only on Coolify Cloud, and cleanup deletes all old images. Roll back with a git revert and redeploy. |
+| Env var rule | secrets are runtime variables only: **Build Variable off** |
 | S3 storage | endpoint `https://nyc3.digitaloceanspaces.com`, region `nyc3`, bucket `shared-infra-storage`, the `shared-infra-coolify-backups` key |
-| Postgres | `shared-postgres`, pinned major version, persistent storage, scheduled backup to S3 (no prefix field; lands at `data/coolify/backups/databases/<team>/shared-postgres-<id>/pg-dump-<db>-<timestamp>-<id>.dmp`). Retention: 2 backups / 7 days local, 14 backups / 30 days on S3. Daily cron `0 3 * * *` (server time, UTC). |
+| Postgres | `shared-postgres`, pinned major version, persistent storage, backup to S3 (no prefix field; lands at `data/coolify/backups/databases/<team>/shared-postgres-<id>/pg-dump-<db>-<timestamp>-<id>.dmp`). Retention: 2 backups / 7 days local, 14 backups / 30 days on S3. Daily cron `0 3 * * *` (server time, UTC). |
+
+## Apps
+
+| App | Domain | Database / role | Source repo | Notes |
+|---|---|---|---|---|
+| poketrain | `poketrain.novaej.com` | `poketrain` / `poketrain_app` | `pandc19/poketrain`, branch `main` | Dockerfile build (Next.js standalone, port 3000), entrypoint runs `prisma migrate deploy`, auto-deploy on. Restored from a Neon dump on 2026-10-18. |
+
+**Never set unused volumes to delete.** Cleanup removes stopped containers first, then unused volumes, so a stopped `shared-postgres` would lose its data volume. Backups are daily, so a loss would cost up to a day.
+
+Add a row for every new app ([new-app.md](new-app.md)).
 
 ## GitHub - secrets, variables, environments
 
@@ -163,19 +177,19 @@ Everything is at **repository level** (Settings -> Secrets and variables -> Acti
 | `shared-infra` | none | `plan` and `apply` jobs |
 | `shared-infra-destroy` | required reviewer(s); restrict to `main` | `plan-destroy` and `apply-destroy` - two separate approvals |
 
-Create `shared-infra-destroy` with its reviewer rule **before** the first destroy: if it doesn't exist GitHub creates it with no reviewers and the destroy runs ungated.
+Create `shared-infra-destroy` with its reviewers **before** the first destroy; GitHub otherwise auto-creates it with none and the destroy runs ungated. Branch rules and repo settings: [git-flow.md](git-flow.md#github-repository-settings).
 
 ### Workflow triggers (`terraform.yml`)
 
 | Event | Condition | Result |
 |---|---|---|
-| Pull request | files under `modules/**`, `environments/**` or the workflow changed; same-repo PRs only | `plan` |
+| Pull request | same-repo PRs only (runs on every PR so the required `plan` check always reports) | `plan` |
 | Push to `main` | same path filter | `plan`, then `apply` |
 | Manual | `action=plan` | `plan` |
 | Manual | `action=apply`, on `main` | `plan`, then `apply` |
 | Manual | `action=destroy`, on `main` | approval 1 -> `plan -destroy` -> approval 2 -> `destroy` |
 
-Docs-only changes never trigger it. A concurrency group (`terraform-shared`) serializes runs. Pins: Terraform 1.7.5 in CI (`required_version >= 1.7`), providers `digitalocean ~> 2.40`, `cloudflare ~> 4.0`, `http ~> 3.4` (lock file committed).
+Docs-only changes never trigger it. Docs-only changes to `main` never trigger it. Concurrency group `terraform-shared` serializes runs. CI pins Terraform 1.7.5 (`required_version >= 1.7`); providers `digitalocean ~> 2.40`, `cloudflare ~> 4.0`, `http ~> 3.4`; lock file committed.
 
 ## Running Terraform locally (alternative to CI)
 

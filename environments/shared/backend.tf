@@ -1,5 +1,5 @@
 # State lives in the hand-created DO Spaces bucket shared-infra-storage, under the
-# tfstate/ prefix (pg-backups/ is used later by Coolify). The bucket and its limited
+# tfstate/ prefix (Coolify writes Postgres backups under data/). The bucket and its limited
 # access key are created manually - see SETUP.md - because Terraform can't create the
 # bucket that holds its own state. Backend blocks can't use variables, so the endpoint
 # is hardcoded (the bucket is in nyc3).
