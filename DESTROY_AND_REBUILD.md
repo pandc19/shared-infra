@@ -38,8 +38,8 @@ Same IP (after a replace): open the server entry and **Validate Server**. New IP
 ## 5. Restore Postgres
 
 1. Check the S3 destination still validates. Recreate `shared-postgres` with the **same major version** (or newer) and wait until it runs.
-2. Recreate each app's role and database ([new-app-database.md](docs/new-app-database.md) steps 4-7). Roles and databases live inside Postgres, so they are not recreated by Terraform.
-3. For each app, restore its latest file from `data/coolify/backups/databases/<team>/shared-postgres-<id>/` in Spaces: Coolify's Restore action if your version has one, otherwise download the `.dmp` and use the steps 8-10 of [new-app-database.md](docs/new-app-database.md) (`pg_restore` over SSH).
+2. Recreate each app's role and database ([new-app-database.md](docs/new-app-database.md) steps 4-6). Roles and databases live inside Postgres, so they are not recreated by Terraform.
+3. For each app, restore its latest file from `data/coolify/backups/databases/<team>/shared-postgres-<id>/` in Spaces: Coolify's Restore action if your version has one, otherwise download the `.dmp` and use steps R1-R4 of [new-app-database.md](docs/new-app-database.md) (`pg_restore` over SSH).
 4. Verify tables and row counts per database, re-enable the backup schedule, run **Backup now**, redeploy the apps, and check each URL over HTTPS.
 
 Verified once (2026-10-18): a custom-format dump from Postgres 18 restored into `shared-postgres` 18.6; it printed nothing and every table came back owned by the app role.

@@ -49,7 +49,7 @@ Environments, the `main` ruleset and security settings: [git-flow.md](git-flow.m
 
 ## 5. Databases per app, restores, laptop access
 
-Each app gets its own database and role; you load data by streaming a dump over SSH; backups are per database. All commands, in order and with where to run each: **[new-app-database.md](new-app-database.md)**.
+Each app gets its own database and role; existing data, if any, is loaded by streaming a dump over SSH; backups are per database. All commands, in order and with where to run each: **[new-app-database.md](new-app-database.md)**.
 
 **Restore test (once, before real data):** create a throwaway database, add it to the backup selection, add a row, back up, drop the table, restore that database's `.dmp` with `pg_restore -d <db> --clean --if-exists`, check the row. A `pg_dump` custom file holds **one** database, so each database restores from its own file. Record the working command in [DESTROY_AND_REBUILD.md](../DESTROY_AND_REBUILD.md).
 

@@ -130,7 +130,7 @@ Created by hand (steps in [manual-configuration.md](manual-configuration.md#1-di
 | Server | name `shared-apps-1`, IP = `reserved_ip` output, port 22, user `root`, build server off |
 | Wildcard domain | `https://novaej.com` (only seeds default app domains; set `<name>.novaej.com` per app) |
 | Proxy | Traefik, started by hand after validation (Server -> Proxy -> Start Proxy) |
-| GitHub source | `coolify-pandc19`: GitHub App owned by the personal account, installed on selected repos. An organization needs its own source. Apps use *Private Repository (with GitHub App)*, never a deploy key. |
+| GitHub source | Two GitHub Apps, each installed on selected repos: `coolify-pandc19` (personal account, poketrain and tidewatch) and `coolify-novaej` (`novaej` organization, comprobify-mcp-server). Apps use *Private Repository (with GitHub App)*, never a deploy key. |
 | Docker cleanup | server-level (Servers -> `shared-apps-1` -> Docker Cleanup): frequency `0 4 * * *` (04:00 UTC), trigger *Run on every schedule*, unused networks **delete**, application images **delete all old images**, unused volumes **keep** (see warning below) |
 | Images kept for rollback | **disabled on purpose** to keep the disk lean: server Docker Cleanup *Application images* = delete all old images, so the app's Rollback page shows *Disabled by the server*. Roll back with a git revert and redeploy. To enable, set that server option to keep retained images; then each app's *Images to keep* (default 2) applies. Rollback never undoes database migrations. |
 | Env var rule | secrets are runtime variables only: **Build Variable off** |
@@ -141,7 +141,9 @@ Created by hand (steps in [manual-configuration.md](manual-configuration.md#1-di
 
 | App | Domain | Database / role | Source repo | Notes |
 |---|---|---|---|---|
-| poketrain | `poketrain.novaej.com` | `poketrain` / `poketrain_app` | `pandc19/poketrain`, branch `main` | Dockerfile build (Next.js standalone, port 3000), entrypoint runs `prisma migrate deploy`, auto-deploy on. Restored from a Neon dump on 2026-10-18. |
+| poketrain | `poketrain.novaej.com` | `poketrain` / `poketrain_app` | `pandc19/poketrain` via `coolify-pandc19`, branch `main` | Dockerfile build (Next.js standalone, port 3000), entrypoint runs `prisma migrate deploy`, auto-deploy on. Restored from a Neon dump on 2026-10-18. |
+| tidewatch | none | `tidewatch_testnet` / `tidewatch_app` | `pandc19/tidewatch` via `coolify-pandc19`, branch `main` | Binance trading bot (Python), Dockerfile build. No port and no domain: it only makes outbound connections. Health is a heartbeat file, not HTTP. Entrypoint runs `alembic upgrade head`. Stop timeout 40 s or more. Running on the Binance testnet since 2026-10-19, no real money. Details in the app's `docs/coolify.md`. |
+| comprobify-mcp-server | `comprobify.novaej.com/mcp` | none (stateless) | `novaej/comprobify-mcp-server` via `coolify-novaej`, branch `main` | Read-only OAuth-protected MCP server for Comprobify (Python), Dockerfile build, port 8000, health check on `/.well-known/oauth-protected-resource/mcp`. Needs `MCP_SERVER_URL`, `COMPROBIFY_WEB_URL`, `COMPROBIFY_API_URL` and `MCP_INTROSPECTION_SECRET` (shared with Comprobify web), all runtime-only. Details in the app's `docs/deployment.md`. |
 
 **Never set unused volumes to delete.** Cleanup removes stopped containers first, then unused volumes, so a stopped `shared-postgres` would lose its data volume. Backups are daily, so a loss would cost up to a day.
 
