@@ -22,7 +22,7 @@ A GitHub App belongs to one account and is installed per repo, so one App serves
 
 ## 2. Database
 
-Give the app its own role and database, load existing data if any, add it to the backup: [new-app-database.md](new-app-database.md) steps 4-12. Result: a URL `postgresql://<app>_app:<password>@<pg>:5432/<app>`.
+Give the app its own role and database and add it to the backup: [new-app-database.md](new-app-database.md) steps 4-8. If the app has existing data, also load the dump (the optional restore section there, steps R1-R4) before the backup step. Result: a URL `postgresql://<app>_app:<password>@<pg>:5432/<app>`.
 
 ## 3. Create the application
 
